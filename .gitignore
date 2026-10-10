@@ -3,3 +3,10 @@ dist
 data
 *.log
 *.tsbuildinfo
+
+# Source sheet music before import
+raw notes data/
+
+# Local machine / tool files
+.DS_Store
+.claude/

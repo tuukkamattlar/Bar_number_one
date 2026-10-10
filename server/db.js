@@ -20,6 +20,7 @@ export function openDb(dataDir) {
       title      TEXT NOT NULL,
       bpm        INTEGER,
       beats      INTEGER NOT NULL DEFAULT 4,
+      "key"      TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -59,6 +60,10 @@ export function openDb(dataDir) {
       text     TEXT
     );
   `);
+
+  // Columns added after the first release.
+  const songColumns = db.prepare('PRAGMA table_info(songs)').all().map((c) => c.name);
+  if (!songColumns.includes('key')) db.exec('ALTER TABLE songs ADD COLUMN "key" TEXT');
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM instruments').get();
   if (n === 0) {

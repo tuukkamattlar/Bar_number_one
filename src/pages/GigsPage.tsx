@@ -3,14 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { CalendarDays, Play, Plus } from 'lucide-react';
 import { api } from '../api';
 import { useData } from '../lib/useData';
-import { instrumentName } from '../lib/parts';
-import { InstrumentSelect } from '../components/InstrumentSelect';
 
 export function GigsPage() {
   const gigs = useData(api.gigs);
-  const instruments = useData(api.instruments);
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', date: '', instrument_id: null as number | null });
+  const [form, setForm] = useState({ name: '', date: '' });
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -37,14 +34,6 @@ export function GigsPage() {
             <span>Date</span>
             <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
           </label>
-          <label className="field">
-            <span>My instrument</span>
-            <InstrumentSelect
-              instruments={instruments.data ?? []}
-              value={form.instrument_id}
-              onChange={(instrument_id) => setForm({ ...form, instrument_id })}
-            />
-          </label>
         </div>
         <button className="btn primary" disabled={!form.name.trim()}>
           <Plus size={16} /> Create gig
@@ -65,7 +54,6 @@ export function GigsPage() {
               </div>
               <div className="gig-meta">
                 <span className="pill">{g.song_count} songs</span>
-                <span className="pill subtle">{instrumentName(instruments.data ?? [], g.instrument_id)}</span>
               </div>
             </Link>
             <Link to={`/gigs/${g.id}/show`} className="btn primary icon round" title="Start show">

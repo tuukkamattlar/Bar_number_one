@@ -17,10 +17,23 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { AlertTriangle, ArrowLeft, GripVertical, MessageSquareText, Play, Plus, Search, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  GripVertical,
+  MessageSquareText,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  Trash2,
+} from 'lucide-react';
 import { api, type Gig, type GigItem, type Instrument, type Song } from '../api';
 import { useData } from '../lib/useData';
 import { partsFor } from '../lib/parts';
+import { useMyInstrument } from '../lib/myInstrument';
+import { DangerZone } from '../components/DangerZone';
 import { InstrumentSelect } from '../components/InstrumentSelect';
 
 type Row = GigItem & { key: string };
@@ -33,11 +46,15 @@ export function GigEditorPage() {
   const navigate = useNavigate();
   const songs = useData(api.songs);
   const instruments = useData(api.instruments);
+  const [instrumentId, setInstrumentId] = useMyInstrument();
   const [gig, setGig] = useState<Gig | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [customText, setCustomText] = useState('');
+  // The setlist is locked unless editing, so a stray drag or click can't reorder or remove anything.
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.gig(gigId).then(
@@ -83,6 +100,26 @@ export function GigEditorPage() {
     persist(arrayMove(rows, from, to));
   }
 
+  const toggleSelected = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  function stopEditing() {
+    setEditing(false);
+    setSelected(new Set());
+  }
+
+  function removeSelected() {
+    const n = selected.size;
+    if (!n || !confirm(`Remove ${n} item${n > 1 ? 's' : ''} from this setlist? The songs stay in your library.`)) return;
+    persist(rows.filter((r) => !selected.has(r.key)));
+    setSelected(new Set());
+  }
+
   const addSong = (song: Song) => persist([...rows, { kind: 'song', song_id: song.id, key: newKey() }]);
   const addText = (text: string) => text.trim() && persist([...rows, { kind: 'text', text: text.trim(), key: newKey() }]);
 
@@ -91,7 +128,7 @@ export function GigEditorPage() {
 
   const songCount = rows.filter((r) => r.kind === 'song').length;
   const totalMissing = rows.filter(
-    (r) => r.kind === 'song' && songById.get(r.song_id) && partsFor(songById.get(r.song_id)!, gig.instrument_id).source === 'none',
+    (r) => r.kind === 'song' && songById.get(r.song_id) && partsFor(songById.get(r.song_id)!, instrumentId).source === 'none',
   ).length;
 
   return (
@@ -109,25 +146,13 @@ export function GigEditorPage() {
           />
           <div className="gig-head-row">
             <input type="date" value={gig.date ?? ''} onChange={(e) => updateGig({ date: e.target.value || null })} />
-            <InstrumentSelect
-              instruments={instruments.data ?? []}
-              value={gig.instrument_id}
-              onChange={(instrument_id) => updateGig({ instrument_id })}
-            />
+            <label className="field inline" title="Remembered on this device for every gig">
+              <span>My instrument</span>
+              <InstrumentSelect instruments={instruments.data ?? []} value={instrumentId} onChange={setInstrumentId} />
+            </label>
           </div>
         </div>
         <div className="gig-head-actions">
-          <button
-            className="btn ghost danger icon"
-            title="Delete gig"
-            onClick={async () => {
-              if (!confirm(`Delete gig “${gig.name}”? Songs stay in your library.`)) return;
-              await api.deleteGig(gig.id);
-              navigate('/gigs');
-            }}
-          >
-            <Trash2 size={16} />
-          </button>
           <Link to={`/gigs/${gig.id}/show`} className={`btn primary ${rows.length ? '' : 'disabled'}`}>
             <Play size={16} /> Start show
           </Link>
@@ -149,7 +174,46 @@ export function GigEditorPage() {
                 </span>
               )}
             </span>
+            {rows.length > 0 && (
+              <button
+                type="button"
+                className={`btn small-btn ${editing ? 'primary' : ''}`}
+                onClick={() => (editing ? stopEditing() : setEditing(true))}
+              >
+                {editing ? (
+                  <>
+                    <Check size={14} /> Done
+                  </>
+                ) : (
+                  <>
+                    <Pencil size={14} /> Edit
+                  </>
+                )}
+              </button>
+            )}
           </div>
+
+          {editing && (
+            <div className="edit-bar">
+              <span className="muted small">Drag ⋮⋮ to reorder · tick rows to remove</span>
+              <span className="edit-bar-actions">
+                <button type="button" className="btn ghost small-btn" onClick={() => setSelected(new Set(rows.map((r) => r.key)))}>
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost small-btn"
+                  disabled={!selected.size}
+                  onClick={() => setSelected(new Set())}
+                >
+                  None
+                </button>
+                <button type="button" className="btn danger small-btn" disabled={!selected.size} onClick={removeSelected}>
+                  <Trash2 size={14} /> Remove{selected.size ? ` ${selected.size}` : ''} from gig
+                </button>
+              </span>
+            </div>
+          )}
 
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={rows.map((r) => r.key)} strategy={verticalListSortingStrategy}>
@@ -160,9 +224,11 @@ export function GigEditorPage() {
                     row={row}
                     number={rows.slice(0, index + 1).filter((r) => r.kind === 'song').length}
                     song={row.kind === 'song' ? songById.get(row.song_id) : undefined}
-                    instrumentId={gig.instrument_id}
+                    instrumentId={instrumentId}
                     instruments={instruments.data ?? []}
-                    onRemove={() => persist(rows.filter((r) => r.key !== row.key))}
+                    editing={editing}
+                    selected={selected.has(row.key)}
+                    onToggle={() => toggleSelected(row.key)}
                     onText={(text) => persist(rows.map((r) => (r.key === row.key && r.kind === 'text' ? { ...r, text } : r)))}
                   />
                 ))}
@@ -230,6 +296,16 @@ export function GigEditorPage() {
           </ul>
         </aside>
       </div>
+
+      <DangerZone
+        what="gig"
+        name={gig.name}
+        detail="The songs stay in your library."
+        onDelete={async () => {
+          await api.deleteGig(gig.id);
+          navigate('/gigs');
+        }}
+      />
     </div>
   );
 }
@@ -240,7 +316,9 @@ function SetlistRow({
   song,
   instrumentId,
   instruments,
-  onRemove,
+  editing,
+  selected,
+  onToggle,
   onText,
 }: {
   row: Row;
@@ -248,10 +326,15 @@ function SetlistRow({
   song: Song | undefined;
   instrumentId: number | null;
   instruments: Instrument[];
-  onRemove: () => void;
+  editing: boolean;
+  selected: boolean;
+  onToggle: () => void;
   onText: (text: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.key });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: row.key,
+    disabled: !editing,
+  });
   const [text, setText] = useState(row.text ?? '');
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -259,10 +342,19 @@ function SetlistRow({
   const instrument = instruments.find((i) => i.id === instrumentId);
 
   return (
-    <li ref={setNodeRef} style={style} className={`setlist-row ${row.kind} ${isDragging ? 'dragging' : ''}`}>
-      <button className="drag-handle" {...attributes} {...listeners} aria-label="Drag to reorder">
-        <GripVertical size={16} />
-      </button>
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`setlist-row ${row.kind} ${isDragging ? 'dragging' : ''} ${selected ? 'selected' : ''}`}
+    >
+      {editing && (
+        <>
+          <input type="checkbox" className="row-check" checked={selected} onChange={onToggle} aria-label="Select" />
+          <button className="drag-handle" {...attributes} {...listeners} aria-label="Drag to reorder">
+            <GripVertical size={16} />
+          </button>
+        </>
+      )}
       {row.kind === 'song' ? (
         <>
           <span className="setlist-number">{number}</span>
@@ -270,6 +362,7 @@ function SetlistRow({
             <span className="song-title">{song?.title ?? 'Missing song'}</span>
           </span>
           <span className="song-row-meta">
+            {song?.key && <span className="pill">{song.key}</span>}
             {song?.bpm && <span className="pill">{song.bpm} bpm</span>}
             {parts?.source === 'general' && instrument && (
               <span className="pill subtle" title={`No ${instrument.name} part — shared sheet will be shown`}>
@@ -291,9 +384,6 @@ function SetlistRow({
           onBlur={() => text !== row.text && onText(text)}
         />
       )}
-      <button className="btn ghost icon" onClick={onRemove} title="Remove from setlist">
-        <X size={16} />
-      </button>
     </li>
   );
 }

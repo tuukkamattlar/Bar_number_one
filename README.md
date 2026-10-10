@@ -19,7 +19,7 @@ npm start          # http://localhost:3001
 ## Views
 
 - **Songs**: title, tempo (BPM), beats per bar, notes, and PDFs. Notes can be for *Everyone* or for one instrument. In show mode you see the shared note plus your instrument's note in the top-left corner. Each PDF is either for one instrument or for *All instruments* (full score / lead sheet). With *Auto*, the instrument is guessed from the file name (`Highway Star - Drums.pdf` → Drums). The coverage row shows which instruments have their own part.
-- **Gigs**: create a gig, pick your instrument, then drag songs and notes ("Break", "Encore", or anything) into order.
+- **Gigs**: create a gig, then drag songs and notes ("Break", "Encore", or anything) into order. Gigs aren't tied to an instrument: each device remembers the instrument last picked in the gig editor or show mode, so the same setlist works for the whole band.
 - **Show**: one page fills the screen; two pages sit side by side (on a portrait screen, one at a time). Each song starts on a new screen.
 - **Instruments**: add or rename instruments and choose which ones show the metronome (Drums by default).
 
@@ -32,6 +32,7 @@ npm start          # http://localhost:3001
 | Home / End | First / last |
 | M | Toggle metronome: red = beat 1, cyan = other beats (tap it to restart on beat 1) |
 | N | Toggle song notes |
+| I | Toggle dark pages (inverted colours, display only; remembered on this device) |
 | F | Fullscreen |
 | Esc | Back to the setlist |
 

@@ -70,7 +70,7 @@ app.delete('/api/instruments/:id', (req, res) => {
 // ---------- Songs ----------
 
 function listSongs() {
-  const songs = db.prepare('SELECT id, title, bpm, beats, created_at FROM songs ORDER BY title COLLATE NOCASE').all();
+  const songs = db.prepare('SELECT id, title, bpm, beats, "key", created_at FROM songs ORDER BY title COLLATE NOCASE').all();
   const files = db.prepare('SELECT * FROM song_files ORDER BY position, id').all();
   const notes = db.prepare('SELECT song_id, instrument_id, text FROM song_notes').all();
   const bySong = new Map(songs.map((s) => [s.id, { ...s, files: [], notes: [] }]));
@@ -80,14 +80,17 @@ function listSongs() {
 }
 const getSong = (songId) => listSongs().find((s) => s.id === songId);
 
+/** Musical key as free text, e.g. "Am" or "F#". Empty means unknown. */
+const optionalKey = (value) => String(value ?? '').trim().slice(0, 12) || null;
+
 app.get('/api/songs', (_req, res) => res.json(listSongs()));
 
 app.post('/api/songs', (req, res) => {
   const title = String(req.body.title ?? '').trim();
   if (!title) throw new HttpError(400, 'Title is required');
   const r = db
-    .prepare('INSERT INTO songs (title, bpm, beats) VALUES (?, ?, ?)')
-    .run(title, optionalInt(req.body.bpm), optionalInt(req.body.beats) ?? 4);
+    .prepare('INSERT INTO songs (title, bpm, beats, "key") VALUES (?, ?, ?, ?)')
+    .run(title, optionalInt(req.body.bpm), optionalInt(req.body.beats) ?? 4, optionalKey(req.body.key));
   res.status(201).json(getSong(Number(r.lastInsertRowid)));
 });
 
@@ -99,13 +102,15 @@ app.patch('/api/songs/:id', (req, res) => {
     title: req.body.title !== undefined ? String(req.body.title).trim() || current.title : current.title,
     bpm: req.body.bpm !== undefined ? optionalInt(req.body.bpm) : current.bpm,
     beats: req.body.beats !== undefined ? optionalInt(req.body.beats) ?? 4 : current.beats,
+    key: req.body.key !== undefined ? optionalKey(req.body.key) : current.key,
   };
   if (next.bpm !== null && (next.bpm < 20 || next.bpm > 400)) throw new HttpError(400, 'BPM must be 20–400');
   if (next.beats < 1 || next.beats > 16) throw new HttpError(400, 'Beats per bar must be 1–16');
-  db.prepare('UPDATE songs SET title = ?, bpm = ?, beats = ? WHERE id = ?').run(
+  db.prepare('UPDATE songs SET title = ?, bpm = ?, beats = ?, "key" = ? WHERE id = ?').run(
     next.title,
     next.bpm,
     next.beats,
+    next.key,
     songId,
   );
   res.json(getSong(songId));

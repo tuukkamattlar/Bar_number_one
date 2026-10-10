@@ -26,6 +26,7 @@ export interface Song {
   title: string;
   bpm: number | null;
   beats: number;
+  key: string | null;
   files: SongFile[];
   notes: SongNote[];
 }

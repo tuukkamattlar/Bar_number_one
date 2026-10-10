@@ -11,7 +11,7 @@ export interface PageRef {
 export type Slide =
   | { kind: 'pages'; item: number; song: Song; pages: PageRef[]; part: number; partCount: number; source: PartSource }
   | { kind: 'text'; item: number; text: string }
-  | { kind: 'empty'; item: number; song: Song | null; reason: string };
+  | { kind: 'empty'; item: number; song: Song | null; reason: string; noPart?: boolean };
 
 /** Page counts of all files involved, loaded in parallel. A broken PDF resolves to an Error instead of rejecting. */
 export async function loadPageCounts(urls: string[]): Promise<Map<string, number | Error>> {
@@ -76,6 +76,7 @@ export function buildSlides(
         reason: broken.length
           ? `Couldn’t open ${broken.join(', ')}.`
           : `No sheet music for ${instrumentLabel}.`,
+        noPart: broken.length === 0,
       });
       return;
     }

@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, Music2, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { FileText, Hand, Music2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { api, fileUrl, type Instrument, type Song } from '../api';
 import { useData } from '../lib/useData';
+import { Metronome } from '../components/Metronome';
+import { DangerZone } from '../components/DangerZone';
 import { instrumentName, partsFor } from '../lib/parts';
 
 export function SongsPage() {
@@ -57,6 +59,7 @@ export function SongsPage() {
                   {s.notes.length > 0 && <span className="muted small">{notePreview(s)}</span>}
                 </span>
                 <span className="song-row-meta">
+                  {s.key && <span className="pill">{s.key}</span>}
                   {s.bpm && <span className="pill">{s.bpm} bpm</span>}
                   <span className="pill subtle">
                     <FileText size={12} /> {s.files.length}
@@ -109,11 +112,18 @@ function SongDetail({
     title: song.title,
     bpm: song.bpm?.toString() ?? '',
     beats: song.beats.toString(),
+    key: song.key ?? '',
   });
   const [target, setTarget] = useState<string>('auto');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [hoverTempo, setHoverTempo] = useState(false);
+  const [focusTempo, setFocusTempo] = useState(false);
+  const previewBpm = Number(form.bpm);
+  const previewBeats = Number(form.beats) || 4;
+  const showPreview =
+    (hoverTempo || focusTempo) && previewBpm >= 20 && previewBpm <= 400 && previewBeats >= 1 && previewBeats <= 16;
 
   async function run(action: () => Promise<Song | void>) {
     setError(null);
@@ -127,7 +137,7 @@ function SongDetail({
 
   const save = (field: keyof typeof form) => {
     const value = form[field];
-    const current = field === 'bpm' ? (song.bpm?.toString() ?? '') : String(song[field]);
+    const current = field === 'bpm' ? (song.bpm?.toString() ?? '') : String(song[field] ?? '');
     if (value === current) return;
     run(() => api.updateSong(song.id, { [field]: value === '' ? null : value } as Partial<Song>));
   };
@@ -156,30 +166,37 @@ function SongDetail({
           onChange={(e) => setForm({ ...form, title: e.target.value })}
           onBlur={() => save('title')}
         />
-        <button
-          className="btn ghost danger"
-          onClick={async () => {
-            if (!confirm(`Delete “${song.title}” and all its PDFs?`)) return;
-            await api.deleteSong(song.id);
-            onDelete();
-          }}
-        >
-          <Trash2 size={16} /> Delete
-        </button>
       </div>
 
       <div className="field-grid tempo">
-        <label className="field">
+        <label
+          className="field tempo-field"
+          onMouseEnter={() => setHoverTempo(true)}
+          onMouseLeave={() => setHoverTempo(false)}
+          onFocus={() => setFocusTempo(true)}
+          onBlur={() => setFocusTempo(false)}
+        >
           <span>Tempo (BPM)</span>
-          <input
-            type="number"
-            min={20}
-            max={400}
-            value={form.bpm}
-            onChange={(e) => setForm({ ...form, bpm: e.target.value })}
-            onBlur={() => save('bpm')}
-            placeholder="e.g. 120"
-          />
+          <div className="tempo-row">
+            <input
+              type="number"
+              min={20}
+              max={400}
+              value={form.bpm}
+              onChange={(e) => setForm({ ...form, bpm: e.target.value })}
+              onBlur={() => save('bpm')}
+              placeholder="e.g. 120"
+            />
+            <TapTempo
+              onTempo={(bpm) => setForm((f) => ({ ...f, bpm: String(bpm) }))}
+              onDone={(bpm) => run(() => api.updateSong(song.id, { bpm }))}
+            />
+          </div>
+          {showPreview && (
+            <div className="tempo-preview">
+              <Metronome bpm={previewBpm} beats={previewBeats} resetKey={song.id} />
+            </div>
+          )}
         </label>
         <label className="field">
           <span>Beats per bar</span>
@@ -190,6 +207,16 @@ function SongDetail({
             value={form.beats}
             onChange={(e) => setForm({ ...form, beats: e.target.value })}
             onBlur={() => save('beats')}
+          />
+        </label>
+        <label className="field">
+          <span>Key</span>
+          <input
+            value={form.key}
+            maxLength={12}
+            onChange={(e) => setForm({ ...form, key: e.target.value })}
+            onBlur={() => save('key')}
+            placeholder="e.g. Am"
           />
         </label>
       </div>
@@ -299,6 +326,16 @@ function SongDetail({
         </div>
       ))}
       {song.files.length === 0 && <p className="muted small">No sheet music yet.</p>}
+
+      <DangerZone
+        what="song"
+        name={song.title}
+        detail="Its PDFs are deleted too, and it’s removed from every gig."
+        onDelete={async () => {
+          await api.deleteSong(song.id);
+          onDelete();
+        }}
+      />
     </div>
   );
 }
@@ -362,4 +399,61 @@ function coverageLabel(source: string) {
   if (source === 'instrument') return 'Has its own part';
   if (source === 'general') return 'Uses the “All instruments” PDF';
   return 'Nothing to show — the show will display a placeholder';
+}
+
+/**
+ * Tap along to set the tempo. Averages the last few taps, starts over after a
+ * 2 s pause, and hands the result to `onDone` once tapping stops.
+ */
+function TapTempo({ onTempo, onDone }: { onTempo: (bpm: number) => void; onDone: (bpm: number) => void }) {
+  const taps = useRef<number[]>([]);
+  const pending = useRef<number | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const [flash, setFlash] = useState(0);
+  const done = useRef(onDone);
+  done.current = onDone;
+
+  // Save straight away if the editor closes mid-tap.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      if (pending.current !== null) done.current(pending.current);
+    },
+    [],
+  );
+
+  function tap() {
+    const now = performance.now();
+    const last = taps.current[taps.current.length - 1];
+    if (last !== undefined && now - last > 2000) taps.current = [];
+    taps.current = [...taps.current, now].slice(-8);
+    setFlash((n) => n + 1);
+
+    const t = taps.current;
+    if (t.length < 2) return;
+    const bpm = Math.round((60000 * (t.length - 1)) / (t[t.length - 1] - t[0]));
+    if (bpm < 20 || bpm > 400) return;
+    onTempo(bpm);
+    pending.current = bpm;
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      pending.current = null;
+      done.current(bpm);
+    }, 2000);
+  }
+
+  return (
+    <button
+      type="button"
+      className="btn tap-btn"
+      title="Tap along to set the tempo"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        tap();
+      }}
+      onClick={(e) => e.detail === 0 && tap()} // keyboard (Space / Enter)
+    >
+      <Hand size={15} key={flash} className={flash ? 'tap-pulse' : undefined} /> Tap
+    </button>
+  );
 }

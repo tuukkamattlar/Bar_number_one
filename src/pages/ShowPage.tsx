@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Columns2,
+  Contrast,
   Maximize,
   Minimize,
   RectangleVertical,
@@ -17,11 +18,56 @@ import { buildSlides, loadPageCounts, urlsFor, type Slide } from '../lib/slides'
 import { PdfPage } from '../components/PdfPage';
 import { Metronome } from '../components/Metronome';
 import { InstrumentSelect } from '../components/InstrumentSelect';
+import { getMyInstrument, setMyInstrument } from '../lib/myInstrument';
 
 type Layout = 'auto' | 1 | 2;
 
 const NEXT_KEYS = new Set([' ', 'ArrowRight', 'ArrowDown', 'PageDown', 'Enter']);
 const PREV_KEYS = new Set(['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace']);
+
+/** Dark pages (inverted colours) are display-only and remembered per device. */
+const INVERT_KEY = 'bar1.invertPages';
+function loadInvert() {
+  try {
+    return localStorage.getItem(INVERT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveInvert(on: boolean) {
+  try {
+    localStorage.setItem(INVERT_KEY, on ? '1' : '0');
+  } catch {
+    // Storage blocked: the setting just won't stick.
+  }
+}
+
+/** Shown when a song has no sheet music for the chosen instrument. */
+const NO_PART_LINES = [
+  'Nuotti jäi kotiin',
+  'Treeneissä tää meni',
+  'Nuotti hukassa, basistin syy',
+  'Kuuntele ja seuraa',
+  'Soita sitä mitä muutkin',
+  'Laskee neljään ja toivoo parasta',
+];
+
+function randomLine(except?: number) {
+  let i;
+  do i = Math.floor(Math.random() * NO_PART_LINES.length);
+  while (i === except);
+  return i;
+}
+
+/** Starts on a random line and swaps to a different one every 15 s. */
+function NoPartLine() {
+  const [line, setLine] = useState(() => randomLine());
+  useEffect(() => {
+    const t = setInterval(() => setLine((prev) => randomLine(prev)), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="meme-text">{NO_PART_LINES[line]}</span>;
+}
 
 export function ShowPage() {
   const gigId = Number(useParams().id);
@@ -37,6 +83,15 @@ export function ShowPage() {
   const [landscape, setLandscape] = useState(() => window.innerWidth >= window.innerHeight);
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [notesOn, setNotesOn] = useState(true);
+  const [inverted, setInverted] = useState(loadInvert);
+  const toggleInvert = useCallback(
+    () =>
+      setInverted((on) => {
+        saveInvert(!on);
+        return !on;
+      }),
+    [],
+  );
   const [fullscreen, setFullscreen] = useState(false);
 
   const [pageCounts, setPageCounts] = useState<Map<string, number | Error> | null>(null);
@@ -50,7 +105,7 @@ export function ShowPage() {
         setGig(g);
         setSongs(new Map(s.map((song) => [song.id, song])));
         setInstruments(i);
-        const inst = i.find((x) => x.id === g.instrument_id) ?? null;
+        const inst = i.find((x) => x.id === getMyInstrument()) ?? null;
         setInstrumentId(inst?.id ?? null);
         setMetronomeOn(Boolean(inst?.metronome));
       },
@@ -130,12 +185,13 @@ export function ShowPage() {
       else if (e.key === 'End') go(Infinity);
       else if (e.key === 'm' || e.key === 'M') setMetronomeOn((on) => !on);
       else if (e.key === 'n' || e.key === 'N') setNotesOn((on) => !on);
+      else if (e.key === 'i' || e.key === 'I') toggleInvert();
       else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
       else if (e.key === 'Escape' && !document.fullscreenElement) navigate(`/gigs/${gigId}`);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go, toggleFullscreen, navigate, gigId]);
+  }, [go, toggleFullscreen, toggleInvert, navigate, gigId]);
 
   if (error) return <div className="show-message">{error}</div>;
   if (!gig || !pageCounts)
@@ -192,6 +248,7 @@ export function ShowPage() {
             instruments={instruments}
             value={instrumentId}
             onChange={(id) => {
+              setMyInstrument(id);
               setInstrumentId(id);
               setMetronomeOn(Boolean(instruments.find((i) => i.id === id)?.metronome));
             }}
@@ -202,6 +259,13 @@ export function ShowPage() {
             title={perView === 2 ? 'Show one page' : 'Show two pages side by side'}
           >
             {perView === 2 ? <Columns2 size={18} /> : <RectangleVertical size={18} />}
+          </button>
+          <button
+            className={`btn ghost icon ${inverted ? 'on' : ''}`}
+            onClick={toggleInvert}
+            title="Dark pages (I)"
+          >
+            <Contrast size={18} />
           </button>
           <button
             className={`btn ghost icon ${notesOn ? 'on' : ''}`}
@@ -224,7 +288,7 @@ export function ShowPage() {
       </header>
 
       <div
-        className="stage"
+        className={`stage ${inverted ? 'inverted' : ''}`}
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           go(e.clientX - rect.left < rect.width * 0.3 ? -1 : 1);
@@ -243,10 +307,23 @@ export function ShowPage() {
             <span>{slide.text}</span>
           </div>
         )}
-        {slide?.kind === 'empty' && (
+        {slide?.kind === 'empty' && slide.noPart && (
+          <div className="slide-card meme">
+            <NoPartLine key={index} />
+            <span className="meme-note">(nuotti tälle soittimelle on hukassa järjestelmästä)</span>
+            <img className="meme-img" src="/jazz_stops.jpg" alt="(jazz music stops)" />
+            <span className="meme-sub">
+              {slide.song?.title ?? 'Unknown song'}
+              {slide.song?.key && <> · {slide.song.key}</>}
+              {slide.song?.bpm && <> · ♩ = {slide.song.bpm}</>}
+            </span>
+          </div>
+        )}
+        {slide?.kind === 'empty' && !slide.noPart && (
           <div className="slide-card">
             <span className="slide-card-title">{slide.song?.title ?? 'Unknown song'}</span>
             {slide.song?.bpm && <span className="slide-card-bpm">♩ = {slide.song.bpm}</span>}
+            {slide.song?.key && <span className="slide-card-bpm">{slide.song.key}</span>}
             <span className="muted">{slide.reason}</span>
           </div>
         )}
