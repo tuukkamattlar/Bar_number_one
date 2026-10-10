@@ -57,13 +57,21 @@ export function openDb(dataDir) {
       position INTEGER NOT NULL,
       kind     TEXT NOT NULL CHECK (kind IN ('song', 'text')),
       song_id  INTEGER REFERENCES songs(id) ON DELETE CASCADE,
-      text     TEXT
+      text     TEXT,
+      -- Per-gig song details: who sings, and which instrument counts it in (NULL = the default, drums).
+      singers    TEXT,
+      starter_id INTEGER REFERENCES instruments(id) ON DELETE SET NULL
     );
   `);
 
   // Columns added after the first release.
   const songColumns = db.prepare('PRAGMA table_info(songs)').all().map((c) => c.name);
   if (!songColumns.includes('key')) db.exec('ALTER TABLE songs ADD COLUMN "key" TEXT');
+  const itemColumns = db.prepare('PRAGMA table_info(gig_items)').all().map((c) => c.name);
+  if (!itemColumns.includes('singers')) db.exec('ALTER TABLE gig_items ADD COLUMN singers TEXT');
+  if (!itemColumns.includes('starter_id')) {
+    db.exec('ALTER TABLE gig_items ADD COLUMN starter_id INTEGER REFERENCES instruments(id) ON DELETE SET NULL');
+  }
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM instruments').get();
   if (n === 0) {

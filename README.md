@@ -16,6 +16,16 @@ npm run build
 npm start          # http://localhost:3001
 ```
 
+### One-click start (macOS)
+
+`scripts/start-app.sh` opens the app in Chrome and starts the server first if it isn't running. If the code changed since the last build, it rebuilds first. The server runs in the background and logs to `~/Library/Logs/BarNumberOne.log`. To make a Desktop icon for it:
+
+```bash
+osacompile -o ~/Desktop/"Bar Number One.app" -e 'do shell script quoted form of "'"$PWD"'/scripts/start-app.sh" & " > /dev/null 2>&1"'
+```
+
+To stop the background server: `pkill -f "node server/index.js"`.
+
 ## Views
 
 - **Songs**: title, tempo (BPM), beats per bar, notes, and PDFs. Notes can be for *Everyone* or for one instrument. In show mode you see the shared note plus your instrument's note in the top-left corner. Each PDF is either for one instrument or for *All instruments* (full score / lead sheet). With *Auto*, the instrument is guessed from the file name (`Highway Star - Drums.pdf` → Drums). The coverage row shows which instruments have their own part.

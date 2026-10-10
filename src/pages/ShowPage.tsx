@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
   Columns2,
   Contrast,
   Maximize,
+  Mic,
   Minimize,
+  Minus,
+  PlayCircle,
+  Plus,
   RectangleVertical,
+  RotateCcw,
   StickyNote,
   Timer,
   X,
 } from 'lucide-react';
 import { api, type Gig, type Instrument, type Song } from '../api';
-import { instrumentName, notesFor } from '../lib/parts';
+import { instrumentName, notesFor, starterIdFor } from '../lib/parts';
 import { buildSlides, loadPageCounts, urlsFor, type Slide } from '../lib/slides';
 import { PdfPage } from '../components/PdfPage';
 import { Metronome } from '../components/Metronome';
@@ -96,7 +101,11 @@ export function ShowPage() {
 
   const [pageCounts, setPageCounts] = useState<Map<string, number | Error> | null>(null);
   const [index, setIndex] = useState(0);
-  const currentItem = useRef(0);
+  // Live tempo tweaks per setlist position, for this show only (not saved to the song).
+  const [tempoTweaks, setTempoTweaks] = useState<Map<number, number>>(new Map());
+  // `?from=N` (setlist position) starts the show at that song.
+  const [searchParams] = useSearchParams();
+  const currentItem = useRef(Math.max(0, Number(searchParams.get('from')) || 0));
 
   // Load everything once.
   useEffect(() => {
@@ -205,6 +214,10 @@ export function ShowPage() {
   const slide = slides[index];
   const song = slide && slide.kind !== 'text' ? slide.song : null;
   const notes = song ? notesFor(song, instrumentId) : { shared: '', own: '' };
+  const gigItem = slide ? items[slide.item] : undefined;
+  const songItem = gigItem?.kind === 'song' ? gigItem : null;
+  const singers = songItem?.singers ?? null;
+  const youStart = Boolean(songItem && instrumentId !== null && starterIdFor(songItem, instruments) === instrumentId);
   const songItems = items.map((it, i) => ({ it, i })).filter(({ it }) => it.kind === 'song');
   const songNumber = slide ? songItems.findIndex(({ i }) => i === slide.item) + 1 : 0;
   const nextItem = slide ? items[slide.item + 1] : undefined;
@@ -226,6 +239,16 @@ export function ShowPage() {
                 {songNumber}/{songItems.length}
               </span>
               <span className="show-title">{song?.title ?? '—'}</span>
+              {youStart && (
+                <span className="show-you-start" title="You count this song in">
+                  <PlayCircle size={13} /> You start
+                </span>
+              )}
+              {singers && (
+                <span className="show-singers">
+                  <Mic size={13} /> {singers}
+                </span>
+              )}
               {slide?.kind === 'pages' && slide.partCount > 1 && (
                 <span className="show-part">
                   {slide.part + 1}/{slide.partCount}
@@ -340,9 +363,22 @@ export function ShowPage() {
           </aside>
         )}
 
-        {metronomeOn && song?.bpm && (
-          <div className="metronome-wrap">
-            <Metronome bpm={song.bpm} beats={song.beats} resetKey={slide.item} />
+        {metronomeOn && song?.bpm && slide && (
+          <div className="metronome-wrap" onClick={(e) => e.stopPropagation()}>
+            <TempoMetronome
+              savedBpm={song.bpm}
+              bpm={tempoTweaks.get(slide.item) ?? song.bpm}
+              beats={song.beats}
+              resetKey={slide.item}
+              onBpm={(bpm) =>
+                setTempoTweaks((prev) => {
+                  const next = new Map(prev);
+                  if (bpm === song.bpm) next.delete(slide.item);
+                  else next.set(slide.item, bpm);
+                  return next;
+                })
+              }
+            />
           </div>
         )}
 
@@ -356,12 +392,79 @@ export function ShowPage() {
         >
           <ChevronRight size={28} />
         </button>
+
+        <ShowTimer />
       </div>
 
       <div className="progress" aria-hidden>
         <div style={{ width: `${slides.length ? ((index + 1) / slides.length) * 100 : 0}%` }} />
       </div>
       <span className="sr-only">Instrument: {instrumentName(instruments, instrumentId)}</span>
+    </div>
+  );
+}
+
+/** The show-mode metronome with − / + underneath for nudging the tempo live. */
+function TempoMetronome({
+  savedBpm,
+  bpm,
+  beats,
+  resetKey,
+  onBpm,
+}: {
+  savedBpm: number;
+  bpm: number;
+  beats: number;
+  resetKey: number;
+  onBpm: (bpm: number) => void;
+}) {
+  const nudge = (delta: number) => onBpm(Math.max(20, Math.min(400, bpm + delta)));
+  const changed = bpm !== savedBpm;
+  return (
+    <div className={`tempo-metronome ${changed ? 'changed' : ''}`}>
+      <Metronome bpm={bpm} beats={beats} resetKey={resetKey} />
+      <div className="tempo-nudge">
+        <button type="button" className="btn ghost" onClick={() => nudge(-1)} title="Slower (−1 BPM)" aria-label="Slower">
+          <Minus size={16} />
+        </button>
+        {changed && (
+          <button
+            type="button"
+            className="btn ghost tempo-reset"
+            onClick={() => onBpm(savedBpm)}
+            title={`Back to ${savedBpm} BPM`}
+          >
+            <RotateCcw size={13} /> {savedBpm}
+          </button>
+        )}
+        <button type="button" className="btn ghost" onClick={() => nudge(1)} title="Faster (+1 BPM)" aria-label="Faster">
+          <Plus size={16} />
+        </button>
+        <button type="button" className="btn ghost keikkatempo" onClick={() => nudge(10)} title="+10 BPM">
+          Keikkatempo
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Time since show mode opened, in the bottom-left corner. */
+function ShowTimer() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const total = Math.floor((now - start) / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, '0');
+  const text = h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+  return (
+    <div className="show-timer" title="Time since the show started" aria-label={`Elapsed ${text}`}>
+      {text}
     </div>
   );
 }

@@ -279,10 +279,16 @@ app.put('/api/gigs/:id/items', (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   transaction(db, () => {
     db.prepare('DELETE FROM gig_items WHERE gig_id = ?').run(gigId);
-    const insert = db.prepare('INSERT INTO gig_items (gig_id, position, kind, song_id, text) VALUES (?, ?, ?, ?, ?)');
+    const insert = db.prepare(
+      'INSERT INTO gig_items (gig_id, position, kind, song_id, text, singers, starter_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    const instrumentIds = new Set(listInstruments().map((i) => i.id));
     items.forEach((item, i) => {
-      if (item.kind === 'song') insert.run(gigId, i, 'song', id(item.song_id), null);
-      else insert.run(gigId, i, 'text', null, String(item.text ?? ''));
+      if (item.kind === 'song') {
+        const singers = String(item.singers ?? '').trim().slice(0, 200) || null;
+        const starter = optionalInt(item.starter_id);
+        insert.run(gigId, i, 'song', id(item.song_id), null, singers, instrumentIds.has(starter) ? starter : null);
+      } else insert.run(gigId, i, 'text', null, String(item.text ?? ''), null, null);
     });
   });
   res.json(getGig(gigId));

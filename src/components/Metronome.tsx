@@ -16,11 +16,20 @@ const FLASH_MS = 110;
  */
 export function Metronome({ bpm, beats, resetKey }: Props) {
   const startRef = useRef(performance.now());
+  const intervalRef = useRef(60000 / bpm);
   const [state, setState] = useState({ beat: 0, on: true });
 
   useEffect(() => {
     startRef.current = performance.now();
-  }, [resetKey, bpm, beats]);
+  }, [resetKey, beats]);
+
+  // A tempo change keeps the count going from the same spot in the bar instead of restarting.
+  useEffect(() => {
+    const now = performance.now();
+    const beatsSoFar = (now - startRef.current) / intervalRef.current;
+    intervalRef.current = 60000 / bpm;
+    startRef.current = now - beatsSoFar * intervalRef.current;
+  }, [bpm]);
 
   useEffect(() => {
     let frame = 0;

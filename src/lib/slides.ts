@@ -95,5 +95,8 @@ export function buildSlides(
     }
   });
 
+  // Every gig ends with a send-off screen; its `item` points just past the setlist.
+  if (items.some((i) => i.kind === 'song')) slides.push({ kind: 'text', item: items.length, text: 'Onnea roudaukseen :))' });
+
   return slides;
 }

@@ -28,3 +28,17 @@ export function instrumentName(instruments: Instrument[], id: number | null | un
   if (id === null || id === undefined) return 'All instruments';
   return instruments.find((i) => i.id === id)?.name ?? 'Unknown instrument';
 }
+
+/** Songs are started by the drums unless a gig says otherwise. */
+export function defaultStarterId(instruments: Instrument[]) {
+  return (
+    instruments.find((i) => i.name.trim().toLowerCase() === 'drums')?.id ??
+    instruments.find((i) => i.metronome)?.id ??
+    null
+  );
+}
+
+export function starterIdFor(item: { starter_id?: number | null }, instruments: Instrument[]) {
+  const known = item.starter_id != null && instruments.some((i) => i.id === item.starter_id);
+  return known ? item.starter_id! : defaultStarterId(instruments);
+}

@@ -23,15 +23,18 @@ import {
   Check,
   GripVertical,
   MessageSquareText,
+  Mic,
   Pencil,
   Play,
+  PlayCircle,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
 } from 'lucide-react';
 import { api, type Gig, type GigItem, type Instrument, type Song } from '../api';
 import { useData } from '../lib/useData';
-import { partsFor } from '../lib/parts';
+import { defaultStarterId, partsFor, starterIdFor } from '../lib/parts';
 import { useMyInstrument } from '../lib/myInstrument';
 import { DangerZone } from '../components/DangerZone';
 import { InstrumentSelect } from '../components/InstrumentSelect';
@@ -81,7 +84,9 @@ export function GigEditorPage() {
   const saving = useRef<Promise<unknown>>(Promise.resolve());
   function persist(next: Row[]) {
     setRows(next);
-    const items = next.map(({ kind, song_id, text }) => ({ kind, song_id, text }) as GigItem);
+    const items = next.map(
+      ({ kind, song_id, text, singers, starter_id }) => ({ kind, song_id, text, singers, starter_id }) as GigItem,
+    );
     saving.current = saving.current
       .then(() => api.saveGigItems(gigId, items))
       .then(() => setError(null), (e: Error) => setError(`Couldn’t save setlist: ${e.message}`));
@@ -229,6 +234,10 @@ export function GigEditorPage() {
                     editing={editing}
                     selected={selected.has(row.key)}
                     onToggle={() => toggleSelected(row.key)}
+                    showFrom={`/gigs/${gigId}/show?from=${index}`}
+                    onDetails={(patch) =>
+                      persist(rows.map((r) => (r.key === row.key && r.kind === 'song' ? { ...r, ...patch } : r)))
+                    }
                     onText={(text) => persist(rows.map((r) => (r.key === row.key && r.kind === 'text' ? { ...r, text } : r)))}
                   />
                 ))}
@@ -319,6 +328,8 @@ function SetlistRow({
   editing,
   selected,
   onToggle,
+  onDetails,
+  showFrom,
   onText,
 }: {
   row: Row;
@@ -329,8 +340,15 @@ function SetlistRow({
   editing: boolean;
   selected: boolean;
   onToggle: () => void;
+  onDetails: (patch: { singers?: string | null; starter_id?: number | null }) => void;
+  showFrom: string;
   onText: (text: string) => void;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [singers, setSingers] = useState(row.kind === 'song' ? (row.singers ?? '') : '');
+  const defaultStarter = defaultStarterId(instruments);
+  const starterId = row.kind === 'song' ? starterIdFor(row, instruments) : null;
+  const starterName = instruments.find((i) => i.id === starterId)?.name;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: row.key,
     disabled: !editing,
@@ -362,6 +380,16 @@ function SetlistRow({
             <span className="song-title">{song?.title ?? 'Missing song'}</span>
           </span>
           <span className="song-row-meta">
+            {row.singers && (
+              <span className="pill subtle" title="Singers">
+                <Mic size={12} /> {row.singers}
+              </span>
+            )}
+            {starterId !== defaultStarter && starterName && (
+              <span className="pill subtle" title={`${starterName} starts this song`}>
+                <PlayCircle size={12} /> {starterName}
+              </span>
+            )}
             {song?.key && <span className="pill">{song.key}</span>}
             {song?.bpm && <span className="pill">{song.bpm} bpm</span>}
             {parts?.source === 'general' && instrument && (
@@ -375,6 +403,52 @@ function SetlistRow({
               </span>
             )}
           </span>
+          <button
+            type="button"
+            className={`btn ghost icon details-btn ${detailsOpen ? 'on' : ''}`}
+            onClick={() => setDetailsOpen((o) => !o)}
+            title="Singers and who starts"
+            aria-expanded={detailsOpen}
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+          {!editing && (
+            <Link to={showFrom} className="btn ghost icon start-here" title="Start the show from this song">
+              <Play size={15} />
+            </Link>
+          )}
+          {detailsOpen && (
+            <div className="row-details">
+              <label className="field">
+                <span>Singers</span>
+                <input
+                  value={singers}
+                  maxLength={200}
+                  onChange={(e) => setSingers(e.target.value)}
+                  onBlur={() => singers.trim() !== (row.singers ?? '') && onDetails({ singers: singers.trim() || null })}
+                  placeholder="e.g. Anna, Ville"
+                />
+              </label>
+              <label className="field">
+                <span>Starts the song</span>
+                <select
+                  value={starterId ?? ''}
+                  onChange={(e) => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    onDetails({ starter_id: id === defaultStarter ? null : id });
+                  }}
+                >
+                  {starterId === null && <option value="">—</option>}
+                  {instruments.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                      {i.id === defaultStarter ? ' (default)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </>
       ) : (
         <input

@@ -32,8 +32,17 @@ export interface Song {
 }
 
 export type GigItem =
-  | { id?: number; kind: 'song'; song_id: number; text?: null }
-  | { id?: number; kind: 'text'; song_id?: null; text: string };
+  | {
+      id?: number;
+      kind: 'song';
+      song_id: number;
+      text?: null;
+      /** Who sings this song at this gig (free text). */
+      singers?: string | null;
+      /** Instrument that starts the song; null = the default (drums). */
+      starter_id?: number | null;
+    }
+  | { id?: number; kind: 'text'; song_id?: null; text: string; singers?: null; starter_id?: null };
 
 export interface Gig {
   id: number;
