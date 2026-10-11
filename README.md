@@ -29,8 +29,9 @@ To stop the background server: `pkill -f "node server/index.js"`.
 ## Views
 
 - **Songs**: title, tempo (BPM), beats per bar, notes, and PDFs. Notes can be for *Everyone* or for one instrument. In show mode you see the shared note plus your instrument's note in the top-left corner. Each PDF is either for one instrument or for *All instruments* (full score / lead sheet). With *Auto*, the instrument is guessed from the file name (`Highway Star - Drums.pdf` → Drums). The coverage row shows which instruments have their own part.
-- **Gigs**: create a gig, then drag songs and notes ("Break", "Encore", or anything) into order. Gigs aren't tied to an instrument: each device remembers the instrument last picked in the gig editor or show mode, so the same setlist works for the whole band.
+- **Gigs**: create a gig, then drag songs and notes ("Break", "Encore", or anything) into order. Gigs aren't tied to an instrument: pick yours in the top bar (or in show mode). Each device remembers it for every page, so the same setlist works for the whole band.
 - **Show**: one page fills the screen; two pages sit side by side (on a portrait screen, one at a time). Each song starts on a new screen.
+- **Practice**: search songs or singers and open one song on its own. Here you can also pin **sticky notes** to a spot on the sheet ("Add note", then tap the music). Notes show in gigs too, read-only, for the instrument they were written with.
 - **Instruments**: add or rename instruments and choose which ones show the metronome (Drums by default).
 
 ### Show mode keys
@@ -41,8 +42,9 @@ To stop the background server: `pkill -f "node server/index.js"`.
 | Shift+Space, ←, ↑, PageUp, click on the left side | Previous |
 | Home / End | First / last |
 | M | Toggle metronome: red = beat 1, cyan = other beats (tap it to restart on beat 1) |
-| N | Toggle song notes |
+| N | Toggle song notes and sticky notes |
 | I | Toggle dark pages (inverted colours, display only; remembered on this device) |
+| E | Toggle the entertainment split screen (brain rot video or games; drag the divider to resize) |
 | F | Fullscreen |
 | Esc | Back to the setlist |
 

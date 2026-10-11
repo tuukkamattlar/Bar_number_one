@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RenderTask } from 'pdfjs-dist';
 import { loadPdf } from '../lib/pdf';
 
 interface Props {
   url: string;
   pageNumber: number;
+  /** Drawn exactly over the rendered page (e.g. sticky notes), positioned in % of the page. */
+  overlay?: ReactNode;
+  /** When set, a tap on the page reports where it landed (0–1 across and down) instead of bubbling. */
+  onPick?: (x: number, y: number) => void;
 }
 
 /** Renders one PDF page scaled to fit (contain) its parent box, sharp on high-DPI screens. */
-export function PdfPage({ url, pageNumber }: Props) {
+export function PdfPage({ url, pageNumber, overlay, onPick }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -72,7 +76,24 @@ export function PdfPage({ url, pageNumber }: Props) {
 
   return (
     <div ref={boxRef} className="pdf-page">
-      {error ? <div className="pdf-error">Couldn’t show this page — {error}</div> : <canvas ref={canvasRef} className={ready ? 'ready' : ''} />}
+      {error ? (
+        <div className="pdf-error">Couldn’t show this page — {error}</div>
+      ) : (
+        <div
+          className={`pdf-sheet ${onPick ? 'picking' : ''}`}
+          onClick={
+            onPick &&
+            ((e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              onPick((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+            })
+          }
+        >
+          <canvas ref={canvasRef} className={ready ? 'ready' : ''} />
+          {ready && overlay}
+        </div>
+      )}
     </div>
   );
 }

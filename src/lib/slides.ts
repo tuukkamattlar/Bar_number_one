@@ -5,6 +5,7 @@ import { partsFor, type PartSource } from './parts';
 export interface PageRef {
   url: string;
   page: number;
+  fileId: number;
 }
 
 /** One "screen" in show mode. `item` is the setlist index it belongs to. */
@@ -44,6 +45,7 @@ export function buildSlides(
   instrumentLabel: string,
   pageCounts: Map<string, number | Error>,
   perView: number,
+  outro = true,
 ): Slide[] {
   const slides: Slide[] = [];
 
@@ -64,7 +66,7 @@ export function buildSlides(
     for (const f of files) {
       const url = fileUrl(f);
       const count = pageCounts.get(url);
-      if (typeof count === 'number') for (let p = 1; p <= count; p++) pages.push({ url, page: p });
+      if (typeof count === 'number') for (let p = 1; p <= count; p++) pages.push({ url, page: p, fileId: f.id });
       else broken.push(f.original_name);
     }
 
@@ -96,7 +98,7 @@ export function buildSlides(
   });
 
   // Every gig ends with a send-off screen; its `item` points just past the setlist.
-  if (items.some((i) => i.kind === 'song')) slides.push({ kind: 'text', item: items.length, text: 'Onnea roudaukseen :))' });
+  if (outro && items.some((i) => i.kind === 'song')) slides.push({ kind: 'text', item: items.length, text: 'Onnea roudaukseen :))' });
 
   return slides;
 }

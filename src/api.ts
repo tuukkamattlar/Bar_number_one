@@ -21,12 +21,32 @@ export interface SongNote {
   text: string;
 }
 
+/** A sticky note pinned to a spot on a sheet: x/y are fractions of the page. */
+export interface StickyNote {
+  id: number;
+  file_id: number;
+  page: number;
+  x: number;
+  y: number;
+  text: string;
+  instrument_id: number | null;
+}
+
+export interface Singer {
+  id: number;
+  name: string;
+}
+
 export interface Song {
   id: number;
   title: string;
   bpm: number | null;
   beats: number;
   key: string | null;
+  /** Default singers; a gig can override them per song. */
+  singers: string | null;
+  /** Playing time in seconds, for setlist timing. */
+  length_sec: number | null;
   files: SongFile[];
   notes: SongNote[];
 }
@@ -76,6 +96,15 @@ export const api = {
   deleteInstrument: (id: number) => request<void>('DELETE', `/api/instruments/${id}`),
 
   songs: () => request<Song[]>('GET', '/api/songs'),
+  stickyNotes: () => request<StickyNote[]>('GET', '/api/sticky-notes'),
+  createStickyNote: (data: Omit<StickyNote, 'id'>) => request<StickyNote>('POST', '/api/sticky-notes', data),
+  updateStickyNote: (id: number, data: Partial<StickyNote>) => request<StickyNote>('PATCH', `/api/sticky-notes/${id}`, data),
+  deleteStickyNote: (id: number) => request<void>('DELETE', `/api/sticky-notes/${id}`),
+  singers: () => request<Singer[]>('GET', '/api/singers'),
+  createSinger: (name: string) => request<Singer[]>('POST', '/api/singers', { name }),
+  renameSinger: (id: number, name: string) => request<Singer[]>('PATCH', `/api/singers/${id}`, { name }),
+  deleteSinger: (id: number) => request<Singer[]>('DELETE', `/api/singers/${id}`),
+  songSingers: () => request<{ song_id: number; singers: string }[]>('GET', '/api/song-singers'),
   createSong: (data: Partial<Song>) => request<Song>('POST', '/api/songs', data),
   updateSong: (id: number, data: Partial<Song>) => request<Song>('PATCH', `/api/songs/${id}`, data),
   setNote: (songId: number, instrument_id: number | null, text: string) =>
@@ -92,7 +121,7 @@ export const api = {
 
   gigs: () => request<Gig[]>('GET', '/api/gigs'),
   gig: (id: number) => request<Gig>('GET', `/api/gigs/${id}`),
-  createGig: (data: Partial<Gig>) => request<Gig>('POST', '/api/gigs', data),
+  createGig: (data: Partial<Gig> & { copy_from?: number | null }) => request<Gig>('POST', '/api/gigs', data),
   updateGig: (id: number, data: Partial<Gig>) => request<Gig>('PATCH', `/api/gigs/${id}`, data),
   deleteGig: (id: number) => request<void>('DELETE', `/api/gigs/${id}`),
   saveGigItems: (id: number, items: GigItem[]) => request<Gig>('PUT', `/api/gigs/${id}/items`, { items }),

@@ -1,19 +1,33 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CalendarCheck, CalendarDays, Play, Plus } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Copy, Play, Plus } from 'lucide-react';
 import { api } from '../api';
 import { useData } from '../lib/useData';
 
 export function GigsPage() {
   const gigs = useData(api.gigs);
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', date: localToday() });
+  const [form, setForm] = useState({ name: '', date: localToday(), copy_from: null as number | null });
+  const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    const gig = await api.createGig(form);
-    navigate(`/gigs/${gig.id}`);
+    try {
+      const gig = await api.createGig(form);
+      navigate(`/gigs/${gig.id}`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  /** Use an existing gig as the starting point for a new one. */
+  function copyGig(id: number) {
+    setForm((f) => ({ ...f, copy_from: id }));
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    nameRef.current?.focus({ preventScroll: true });
   }
 
   const all = gigs.data ?? [];
@@ -51,12 +65,13 @@ export function GigsPage() {
         </section>
       ))}
 
-      <form className="panel new-gig" onSubmit={create}>
+      <form className="panel new-gig" onSubmit={create} ref={formRef}>
         <h2>New gig</h2>
         <div className="field-grid">
           <label className="field">
             <span>Name</span>
             <input
+              ref={nameRef}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Kissanristiäiset"
@@ -67,9 +82,25 @@ export function GigsPage() {
             <span>Date</span>
             <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
           </label>
+          <label className="field">
+            <span>Start from</span>
+            <select
+              value={form.copy_from ?? ''}
+              onChange={(e) => setForm({ ...form, copy_from: e.target.value ? Number(e.target.value) : null })}
+            >
+              <option value="">Empty setlist</option>
+              {sorted.map((g) => (
+                <option key={g.id} value={g.id}>
+                  Copy of {g.name}
+                  {g.date ? ` (${formatDate(g.date)})` : ''} · {g.song_count} songs
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+        {error && <p className="error">{error}</p>}
         <button className="btn primary" disabled={!form.name.trim()}>
-          <Plus size={16} /> Create gig
+          {form.copy_from ? <Copy size={16} /> : <Plus size={16} />} Create gig
         </button>
       </form>
 
@@ -91,6 +122,15 @@ export function GigsPage() {
                   <span className="pill">{g.song_count} songs</span>
                 </div>
               </Link>
+              <button
+                type="button"
+                className="btn ghost icon"
+                onClick={() => copyGig(g.id)}
+                title="Copy as a new gig"
+                aria-label={`Copy ${g.name} as a new gig`}
+              >
+                <Copy size={16} />
+              </button>
               <Link to={`/gigs/${g.id}/show`} className="btn primary icon round" title="Start show">
                 <Play size={18} />
               </Link>

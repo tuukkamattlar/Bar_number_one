@@ -5,7 +5,9 @@ import {
   ChevronRight,
   Columns2,
   Contrast,
+  Gamepad2,
   Maximize,
+  MessageSquarePlus,
   Mic,
   Minimize,
   Minus,
@@ -17,11 +19,13 @@ import {
   Timer,
   X,
 } from 'lucide-react';
-import { api, type Gig, type Instrument, type Song } from '../api';
-import { instrumentName, notesFor, starterIdFor } from '../lib/parts';
+import { api, type Gig, type Instrument, type Song, type StickyNote as Sticky } from '../api';
+import { instrumentName, notesFor, singersFor, starterIdFor } from '../lib/parts';
 import { buildSlides, loadPageCounts, urlsFor, type Slide } from '../lib/slides';
 import { PdfPage } from '../components/PdfPage';
 import { Metronome } from '../components/Metronome';
+import { Entertainment } from '../components/Entertainment';
+import { StickyLayer, type ActiveSticky } from '../components/StickyLayer';
 import { InstrumentSelect } from '../components/InstrumentSelect';
 import { getMyInstrument, setMyInstrument } from '../lib/myInstrument';
 
@@ -29,6 +33,21 @@ type Layout = 'auto' | 1 | 2;
 
 const NEXT_KEYS = new Set([' ', 'ArrowRight', 'ArrowDown', 'PageDown', 'Enter']);
 const PREV_KEYS = new Set(['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace']);
+
+function loadSetting(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function saveSetting(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked: the setting just won't stick.
+  }
+}
 
 /** Dark pages (inverted colours) are display-only and remembered per device. */
 const INVERT_KEY = 'bar1.invertPages';
@@ -75,7 +94,11 @@ function NoPartLine() {
 }
 
 export function ShowPage() {
-  const gigId = Number(useParams().id);
+  const params = useParams();
+  const gigId = Number(params.id);
+  // /practice/:songId: a one-song "gig" for practising, no saved setlist involved.
+  const practiceSongId = params.songId ? Number(params.songId) : null;
+  const exitTo = practiceSongId ? '/practice' : `/gigs/${gigId}`;
   const navigate = useNavigate();
 
   const [gig, setGig] = useState<Gig | null>(null);
@@ -98,6 +121,19 @@ export function ShowPage() {
     [],
   );
   const [fullscreen, setFullscreen] = useState(false);
+  // Entertainment split screen: off at the start of every show; its size is remembered per device.
+  const [funOn, setFunOn] = useState(false);
+  const [split, setSplit] = useState(() => {
+    const v = Number(loadSetting('bar1.fun.split'));
+    return v >= 0.25 && v <= 0.85 ? v : 0.6;
+  });
+  const [noPeeking, setNoPeeking] = useState(false);
+  // Sticky notes on the sheets: shown in gigs, written only in practice ("add" mode).
+  const [stickies, setStickies] = useState<Sticky[]>([]);
+  const [addingNotes, setAddingNotes] = useState(false);
+  const [activeSticky, setActiveSticky] = useState<ActiveSticky | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => saveSetting('bar1.fun.split', String(split)), [split]);
 
   const [pageCounts, setPageCounts] = useState<Map<string, number | Error> | null>(null);
   const [index, setIndex] = useState(0);
@@ -109,8 +145,24 @@ export function ShowPage() {
 
   // Load everything once.
   useEffect(() => {
-    Promise.all([api.gig(gigId), api.songs(), api.instruments()]).then(
+    const loadGig =
+      practiceSongId !== null
+        ? Promise.resolve<Gig>({
+            id: 0,
+            name: 'Practice',
+            date: null,
+            instrument_id: null,
+            song_count: 1,
+            items: [{ kind: 'song', song_id: practiceSongId }],
+          })
+        : api.gig(gigId);
+    api.stickyNotes().then(setStickies, () => setStickies([]));
+    Promise.all([loadGig, api.songs(), api.instruments()]).then(
       ([g, s, i]) => {
+        if (practiceSongId !== null && !s.some((song) => song.id === practiceSongId)) {
+          setError('This song is no longer in the library.');
+          return;
+        }
         setGig(g);
         setSongs(new Map(s.map((song) => [song.id, song])));
         setInstruments(i);
@@ -120,7 +172,7 @@ export function ShowPage() {
       },
       (e: Error) => setError(e.message),
     );
-  }, [gigId]);
+  }, [gigId, practiceSongId]);
 
   useEffect(() => {
     const onResize = () => setLandscape(window.innerWidth >= window.innerHeight);
@@ -151,9 +203,17 @@ export function ShowPage() {
   const slides: Slide[] = useMemo(
     () =>
       pageCounts
-        ? buildSlides(items, songs, instrumentId, instrument?.name ?? 'this instrument', pageCounts, perView)
+        ? buildSlides(
+            items,
+            songs,
+            instrumentId,
+            instrument?.name ?? 'this instrument',
+            pageCounts,
+            perView,
+            practiceSongId === null,
+          )
         : [],
-    [items, songs, instrumentId, instrument, pageCounts, perView],
+    [items, songs, instrumentId, instrument, pageCounts, perView, practiceSongId],
   );
 
   // When the slide list changes (instrument / layout switch), stay on the same song.
@@ -173,6 +233,52 @@ export function ShowPage() {
     [slides],
   );
 
+  // Your instrument's notes plus untagged ones; with no instrument picked, everything.
+  const visibleStickies = stickies.filter(
+    (n) => instrumentId === null || n.instrument_id === null || n.instrument_id === instrumentId,
+  );
+  const activeStickyRef = useRef(activeSticky);
+  activeStickyRef.current = activeSticky;
+
+  async function saveSticky(text: string) {
+    const a = activeSticky;
+    if (!a) return;
+    if (a.kind === 'new') {
+      const note = await api.createStickyNote({ file_id: a.fileId, page: a.page, x: a.x, y: a.y, text, instrument_id: instrumentId });
+      setStickies((list) => [...list, note]);
+    } else {
+      const note = await api.updateStickyNote(a.id, { text });
+      setStickies((list) => list.map((n) => (n.id === note.id ? note : n)));
+    }
+    setActiveSticky(null);
+  }
+
+  async function deleteSticky(note: Sticky) {
+    await api.deleteStickyNote(note.id);
+    setStickies((list) => list.filter((n) => n.id !== note.id));
+    setActiveSticky(null);
+  }
+
+  /** Drag the divider: the sheet music gets 25–85 % of the space. */
+  function startSplitDrag(e: React.PointerEvent) {
+    e.preventDefault();
+    const el = bodyRef.current;
+    if (!el) return;
+    document.body.classList.add('dragging-split');
+    const move = (ev: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      const f = landscape ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
+      setSplit(Math.min(0.85, Math.max(0.25, f)));
+    };
+    const up = () => {
+      document.body.classList.remove('dragging-split');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen?.().catch(() => {});
@@ -180,7 +286,12 @@ export function ShowPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof Element && e.target.closest('select, input')) return;
+      if (e.target instanceof Element && e.target.closest('select, input, textarea')) return;
+      // Space/Enter on a button in the entertainment panel presses that button; page-turn keys
+      // (arrows, PageUp/PageDown from a pedal) keep working whatever is focused.
+      if ((e.key === ' ' || e.key === 'Enter') && e.target instanceof Element && e.target.closest('.fun-panel button')) {
+        return;
+      }
       if (e.key === ' ' && e.shiftKey) {
         e.preventDefault();
         go(-1);
@@ -196,11 +307,13 @@ export function ShowPage() {
       else if (e.key === 'n' || e.key === 'N') setNotesOn((on) => !on);
       else if (e.key === 'i' || e.key === 'I') toggleInvert();
       else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-      else if (e.key === 'Escape' && !document.fullscreenElement) navigate(`/gigs/${gigId}`);
+      else if (e.key === 'e' || e.key === 'E') setFunOn((on) => !on);
+      else if (e.key === 'Escape' && activeStickyRef.current) setActiveSticky(null);
+      else if (e.key === 'Escape' && !document.fullscreenElement) navigate(exitTo);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go, toggleFullscreen, toggleInvert, navigate, gigId]);
+  }, [go, toggleFullscreen, toggleInvert, navigate, exitTo]);
 
   if (error) return <div className="show-message">{error}</div>;
   if (!gig || !pageCounts)
@@ -216,7 +329,7 @@ export function ShowPage() {
   const notes = song ? notesFor(song, instrumentId) : { shared: '', own: '' };
   const gigItem = slide ? items[slide.item] : undefined;
   const songItem = gigItem?.kind === 'song' ? gigItem : null;
-  const singers = songItem?.singers ?? null;
+  const singers = songItem ? singersFor(songItem, song) : null;
   const youStart = Boolean(songItem && instrumentId !== null && starterIdFor(songItem, instruments) === instrumentId);
   const songItems = items.map((it, i) => ({ it, i })).filter(({ it }) => it.kind === 'song');
   const songNumber = slide ? songItems.findIndex(({ i }) => i === slide.item) + 1 : 0;
@@ -227,7 +340,7 @@ export function ShowPage() {
   return (
     <div className="show">
       <header className="show-bar">
-        <button className="btn ghost icon" onClick={() => navigate(`/gigs/${gigId}`)} title="Exit (Esc)">
+        <button className="btn ghost icon" onClick={() => navigate(exitTo)} title="Exit (Esc)">
           <X size={18} />
         </button>
         <div className="show-now">
@@ -290,10 +403,23 @@ export function ShowPage() {
           >
             <Contrast size={18} />
           </button>
+          {practiceSongId !== null && (
+            <button
+              className={`btn ghost add-notes-btn ${addingNotes ? 'on' : ''}`}
+              onClick={() => {
+                setAddingNotes((on) => !on);
+                setActiveSticky(null);
+              }}
+              title="Tap the music to pin a sticky note there"
+              aria-pressed={addingNotes}
+            >
+              <MessageSquarePlus size={17} /> <span className="add-notes-label">{addingNotes ? 'Done' : 'Add note'}</span>
+            </button>
+          )}
           <button
             className={`btn ghost icon ${notesOn ? 'on' : ''}`}
             onClick={() => setNotesOn((on) => !on)}
-            title="Song notes (N)"
+            title="Song notes and sticky notes (N)"
           >
             <StickyNote size={18} />
           </button>
@@ -304,15 +430,27 @@ export function ShowPage() {
           >
             <Timer size={18} />
           </button>
+          <button
+            className={`btn ghost icon ${funOn ? 'on' : ''}`}
+            onClick={() => setFunOn((on) => !on)}
+            title="Entertainment (E)"
+            aria-pressed={funOn}
+          >
+            <Gamepad2 size={18} />
+          </button>
           <button className="btn ghost icon" onClick={toggleFullscreen} title="Fullscreen (F)">
             {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
           </button>
         </div>
       </header>
 
+      <div ref={bodyRef} className={`show-body ${landscape ? 'row' : 'col'}`}>
       <div
         className={`stage ${inverted ? 'inverted' : ''}`}
+        style={funOn ? { flex: `0 0 calc(${split * 100}% - 5px)` } : undefined}
         onClick={(e) => {
+          // While adding notes, or with a note open, a tap on the page doesn't turn it.
+          if (addingNotes || activeSticky) return setActiveSticky(null);
           const rect = e.currentTarget.getBoundingClientRect();
           go(e.clientX - rect.left < rect.width * 0.3 ? -1 : 1);
         }}
@@ -321,7 +459,31 @@ export function ShowPage() {
         {slide?.kind === 'pages' && (
           <div className={`spread n${slide.pages.length}`} key={index}>
             {slide.pages.map((p) => (
-              <PdfPage key={`${p.url}#${p.page}`} url={p.url} pageNumber={p.page} />
+              <PdfPage
+                key={`${p.url}#${p.page}`}
+                url={p.url}
+                pageNumber={p.page}
+                onPick={addingNotes ? (x, y) => setActiveSticky({ kind: 'new', fileId: p.fileId, page: p.page, x, y }) : undefined}
+                overlay={
+                  (notesOn || addingNotes) && (
+                    <StickyLayer
+                      notes={visibleStickies.filter((n) => n.file_id === p.fileId && n.page === p.page)}
+                      active={
+                        activeSticky &&
+                        (activeSticky.kind === 'note' ||
+                          (activeSticky.fileId === p.fileId && activeSticky.page === p.page))
+                          ? activeSticky
+                          : null
+                      }
+                      editable={practiceSongId !== null}
+                      onOpen={(n) => setActiveSticky({ kind: 'note', id: n.id })}
+                      onClose={() => setActiveSticky(null)}
+                      onSave={saveSticky}
+                      onDelete={deleteSticky}
+                    />
+                  )
+                }
+              />
             ))}
           </div>
         )}
@@ -364,7 +526,8 @@ export function ShowPage() {
         )}
 
         {metronomeOn && song?.bpm && slide && (
-          <div className="metronome-wrap" onClick={(e) => e.stopPropagation()}>
+          // Hidden (but still running) while a game says no peeking, e.g. counting a minute.
+          <div className={`metronome-wrap ${noPeeking ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
             <TempoMetronome
               savedBpm={song.bpm}
               bpm={tempoTweaks.get(slide.item) ?? song.bpm}
@@ -393,7 +556,31 @@ export function ShowPage() {
           <ChevronRight size={28} />
         </button>
 
-        <ShowTimer />
+        <ShowTimer hidden={noPeeking} />
+      </div>
+
+      {funOn && (
+        <>
+          <div
+            className="split-handle"
+            role="separator"
+            aria-orientation={landscape ? 'vertical' : 'horizontal'}
+            aria-label="Drag to resize"
+            tabIndex={0}
+            onPointerDown={(e) => startSplitDrag(e)}
+            onKeyDown={(e) => {
+              const step = { ArrowLeft: -0.05, ArrowUp: -0.05, ArrowRight: 0.05, ArrowDown: 0.05 }[e.key];
+              if (step === undefined) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setSplit((v) => Math.min(0.85, Math.max(0.25, v + step)));
+            }}
+          />
+          <aside className="fun-panel">
+            <Entertainment onTimerHidden={setNoPeeking} />
+          </aside>
+        </>
+      )}
       </div>
 
       <div className="progress" aria-hidden>
@@ -449,7 +636,7 @@ function TempoMetronome({
 }
 
 /** Time since show mode opened, in the bottom-left corner. */
-function ShowTimer() {
+function ShowTimer({ hidden }: { hidden: boolean }) {
   const [start] = useState(() => Date.now());
   const [now, setNow] = useState(start);
   useEffect(() => {
@@ -463,7 +650,7 @@ function ShowTimer() {
   const sec = String(total % 60).padStart(2, '0');
   const text = h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
   return (
-    <div className="show-timer" title="Time since the show started" aria-label={`Elapsed ${text}`}>
+    <div className={`show-timer ${hidden ? 'hidden' : ''}`} title="Time since the show started" aria-label={`Elapsed ${text}`}>
       {text}
     </div>
   );

@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FileText, Hand, Music2, Plus, Search, Trash2, Upload } from 'lucide-react';
-import { api, fileUrl, type Instrument, type Song } from '../api';
+import { api, fileUrl, type Instrument, type Singer, type Song } from '../api';
 import { useData } from '../lib/useData';
 import { Metronome } from '../components/Metronome';
 import { DangerZone } from '../components/DangerZone';
+import { SingerPicker } from '../components/SingerPicker';
+import { Sheet } from '../components/Sheet';
+import { PHONE, useMediaQuery } from '../lib/useMediaQuery';
+import { formatDuration, parseDuration } from '../lib/duration';
 import { instrumentName, partsFor } from '../lib/parts';
 
 export function SongsPage() {
   const songs = useData(api.songs);
   const instruments = useData(api.instruments);
+  const singerList = useData(api.singers);
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [newTitle, setNewTitle] = useState('');
@@ -37,6 +42,24 @@ export function SongsPage() {
     select(song.id);
   }
 
+  // Phones edit a song in a full-screen sheet instead of the panel beside the list.
+  const phone = useMediaQuery(PHONE);
+  const closeEditor = useCallback(() => select(null), [select]);
+  const detail =
+    selected && instruments.data ? (
+      <SongDetail
+        key={selected.id}
+        song={selected}
+        instruments={instruments.data}
+        singers={singerList.data ?? []}
+        onChange={replaceSong}
+        onDelete={() => {
+          songs.setData((list) => (list ?? []).filter((s) => s.id !== selected.id));
+          select(null);
+        }}
+      />
+    ) : null;
+
   return (
     <div className="split">
       <aside className="panel list-panel">
@@ -61,6 +84,7 @@ export function SongsPage() {
                 <span className="song-row-meta">
                   {s.key && <span className="pill">{s.key}</span>}
                   {s.bpm && <span className="pill">{s.bpm} bpm</span>}
+                  {s.length_sec && <span className="pill subtle">{formatDuration(s.length_sec)}</span>}
                   <span className="pill subtle">
                     <FileText size={12} /> {s.files.length}
                   </span>
@@ -74,25 +98,23 @@ export function SongsPage() {
         </ul>
       </aside>
 
-      <section className="panel detail-panel">
-        {selected && instruments.data ? (
-          <SongDetail
-            key={selected.id}
-            song={selected}
-            instruments={instruments.data}
-            onChange={replaceSong}
-            onDelete={() => {
-              songs.setData((list) => (list ?? []).filter((s) => s.id !== selected.id));
-              select(null);
-            }}
-          />
-        ) : (
-          <div className="placeholder">
-            <Music2 size={40} strokeWidth={1.2} />
-            <p>Pick a song to edit its tempo and sheet music.</p>
-          </div>
-        )}
-      </section>
+      {phone ? (
+        selected &&
+        detail && (
+          <Sheet title="Edit song" onClose={closeEditor} scroll>
+            {detail}
+          </Sheet>
+        )
+      ) : (
+        <section className="panel detail-panel">
+          {detail ?? (
+            <div className="placeholder">
+              <Music2 size={40} strokeWidth={1.2} />
+              <p>Pick a song to edit its tempo and sheet music.</p>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -100,11 +122,13 @@ export function SongsPage() {
 function SongDetail({
   song,
   instruments,
+  singers,
   onChange,
   onDelete,
 }: {
   song: Song;
   instruments: Instrument[];
+  singers: Singer[];
   onChange: (s: Song) => void;
   onDelete: () => void;
 }) {
@@ -113,6 +137,8 @@ function SongDetail({
     bpm: song.bpm?.toString() ?? '',
     beats: song.beats.toString(),
     key: song.key ?? '',
+    singers: song.singers ?? '',
+    length: song.length_sec ? formatDuration(song.length_sec) : '',
   });
   const [target, setTarget] = useState<string>('auto');
   const [busy, setBusy] = useState(false);
@@ -135,7 +161,7 @@ function SongDetail({
     }
   }
 
-  const save = (field: keyof typeof form) => {
+  const save = (field: Exclude<keyof typeof form, 'length'>) => {
     const value = form[field];
     const current = field === 'bpm' ? (song.bpm?.toString() ?? '') : String(song[field] ?? '');
     if (value === current) return;
@@ -219,7 +245,35 @@ function SongDetail({
             placeholder="e.g. Am"
           />
         </label>
+        <label className="field">
+          <span>Length</span>
+          <input
+            value={form.length}
+            inputMode="numeric"
+            onChange={(e) => setForm({ ...form, length: e.target.value })}
+            onBlur={() => {
+              const sec = parseDuration(form.length);
+              if (sec === undefined) return setError('Length should look like 3:45 (minutes:seconds).');
+              setForm((f) => ({ ...f, length: sec ? formatDuration(sec) : '' }));
+              if (sec !== song.length_sec) run(() => api.updateSong(song.id, { length_sec: sec }));
+            }}
+            placeholder="3:45"
+          />
+        </label>
       </div>
+
+      <label className="field">
+        <span>Default singers</span>
+        <SingerPicker
+          value={form.singers}
+          singers={singers}
+          onChange={(value) => setForm((f) => ({ ...f, singers: value }))}
+          onCommit={(value) => {
+            if (value.trim() !== (song.singers ?? '')) run(() => api.updateSong(song.id, { singers: value.trim() || null }));
+          }}
+          placeholder="e.g. Marianna, Kalle (each gig can change these)"
+        />
+      </label>
 
       <h3 className="section-title">Notes</h3>
       <NotesPanel

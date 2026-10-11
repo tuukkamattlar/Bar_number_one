@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Plus, Timer, Trash2 } from 'lucide-react';
-import { api, type Instrument } from '../api';
+import { Mic, Plus, Timer, Trash2 } from 'lucide-react';
+import { api, type Instrument, type Singer } from '../api';
 import { useData } from '../lib/useData';
 
 export function InstrumentsPage() {
@@ -52,7 +52,80 @@ export function InstrumentsPage() {
         </form>
         {error && <p className="error">{error}</p>}
       </section>
+
+      <SingersSection />
     </div>
+  );
+}
+
+/** The band's singers: a pick-list for singer fields. Nothing requires them. */
+function SingersSection() {
+  const singers = useData(api.singers);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(action: () => Promise<Singer[]>) {
+    setError(null);
+    try {
+      singers.setData(await action());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Singers</h2>
+      </div>
+      <p className="muted small">
+        Singers listed here show up as quick picks wherever you set who sings a song. It’s optional: you can always
+        type any name instead. Renaming someone here doesn’t change songs they’re already assigned to.
+      </p>
+
+      <ul className="instrument-list">
+        {singers.data?.map((s) => (
+          <SingerRow key={s.id} singer={s} run={run} />
+        ))}
+      </ul>
+
+      <form
+        className="add-row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          run(() => api.createSinger(name.trim()));
+          setName('');
+        }}
+      >
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add singer, e.g. Marianna" />
+        <button className="btn primary icon" disabled={!name.trim()} title="Add singer">
+          <Plus size={18} />
+        </button>
+      </form>
+      {error && <p className="error">{error}</p>}
+    </section>
+  );
+}
+
+function SingerRow({ singer, run }: { singer: Singer; run: (a: () => Promise<Singer[]>) => void }) {
+  const [name, setName] = useState(singer.name);
+  return (
+    <li className="instrument-row">
+      <Mic size={16} className="muted" />
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => name.trim() && name.trim() !== singer.name && run(() => api.renameSinger(singer.id, name.trim()))}
+      />
+      <button
+        className="btn ghost icon danger"
+        title="Remove from the list"
+        onClick={() => confirm(`Remove ${singer.name} from the singers list?`) && run(() => api.deleteSinger(singer.id))}
+      >
+        <Trash2 size={16} />
+      </button>
+    </li>
   );
 }
 

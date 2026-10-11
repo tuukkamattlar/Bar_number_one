@@ -42,3 +42,9 @@ export function starterIdFor(item: { starter_id?: number | null }, instruments: 
   const known = item.starter_id != null && instruments.some((i) => i.id === item.starter_id);
   return known ? item.starter_id! : defaultStarterId(instruments);
 }
+
+/** Who sings a song at a gig: the gig's own choice if set ('' = nobody), else the song's default. */
+export function singersFor(item: { singers?: string | null }, song: Song | undefined | null) {
+  const value = item.singers ?? song?.singers ?? null;
+  return value?.trim() || null;
+}

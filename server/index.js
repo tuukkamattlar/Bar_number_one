@@ -67,10 +67,41 @@ app.delete('/api/instruments/:id', (req, res) => {
   res.status(204).end();
 });
 
+// ---------- Singers (a pick-list) ----------
+
+const listSingers = () => db.prepare('SELECT * FROM singers ORDER BY position, id').all();
+
+app.get('/api/singers', (_req, res) => res.json(listSingers()));
+
+app.post('/api/singers', (req, res) => {
+  const name = cleanSingers(req.body.name).slice(0, 60);
+  if (!name) throw new HttpError(400, 'Name is required');
+  if (db.prepare('SELECT 1 FROM singers WHERE name = ?').get(name)) throw new HttpError(409, `${name} is already on the list`);
+  const { pos } = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM singers').get();
+  db.prepare('INSERT INTO singers (name, position) VALUES (?, ?)').run(name, pos);
+  res.status(201).json(listSingers());
+});
+
+app.patch('/api/singers/:id', (req, res) => {
+  const singerId = id(req.params.id);
+  if (!db.prepare('SELECT 1 FROM singers WHERE id = ?').get(singerId)) throw new HttpError(404, 'Singer not found');
+  const name = cleanSingers(req.body.name).slice(0, 60);
+  if (!name) throw new HttpError(400, 'Name is required');
+  const clash = db.prepare('SELECT 1 FROM singers WHERE name = ? AND id != ?').get(name, singerId);
+  if (clash) throw new HttpError(409, `${name} is already on the list`);
+  db.prepare('UPDATE singers SET name = ? WHERE id = ?').run(name, singerId);
+  res.json(listSingers());
+});
+
+app.delete('/api/singers/:id', (req, res) => {
+  db.prepare('DELETE FROM singers WHERE id = ?').run(id(req.params.id));
+  res.json(listSingers());
+});
+
 // ---------- Songs ----------
 
 function listSongs() {
-  const songs = db.prepare('SELECT id, title, bpm, beats, "key", created_at FROM songs ORDER BY title COLLATE NOCASE').all();
+  const songs = db.prepare('SELECT id, title, bpm, beats, "key", singers, length_sec, created_at FROM songs ORDER BY title COLLATE NOCASE').all();
   const files = db.prepare('SELECT * FROM song_files ORDER BY position, id').all();
   const notes = db.prepare('SELECT song_id, instrument_id, text FROM song_notes').all();
   const bySong = new Map(songs.map((s) => [s.id, { ...s, files: [], notes: [] }]));
@@ -79,6 +110,12 @@ function listSongs() {
   return [...bySong.values()];
 }
 const getSong = (songId) => listSongs().find((s) => s.id === songId);
+
+/** New songs start at 3 minutes until someone sets the real length. */
+const DEFAULT_SONG_LENGTH = 180;
+
+/** Singer names as free text, e.g. "Anna, Ville". */
+const cleanSingers = (value) => String(value ?? '').trim().slice(0, 200);
 
 /** Musical key as free text, e.g. "Am" or "F#". Empty means unknown. */
 const optionalKey = (value) => String(value ?? '').trim().slice(0, 12) || null;
@@ -89,8 +126,15 @@ app.post('/api/songs', (req, res) => {
   const title = String(req.body.title ?? '').trim();
   if (!title) throw new HttpError(400, 'Title is required');
   const r = db
-    .prepare('INSERT INTO songs (title, bpm, beats, "key") VALUES (?, ?, ?, ?)')
-    .run(title, optionalInt(req.body.bpm), optionalInt(req.body.beats) ?? 4, optionalKey(req.body.key));
+    .prepare('INSERT INTO songs (title, bpm, beats, "key", singers, length_sec) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(
+      title,
+      optionalInt(req.body.bpm),
+      optionalInt(req.body.beats) ?? 4,
+      optionalKey(req.body.key),
+      cleanSingers(req.body.singers) || null,
+      req.body.length_sec !== undefined ? optionalInt(req.body.length_sec) : DEFAULT_SONG_LENGTH,
+    );
   res.status(201).json(getSong(Number(r.lastInsertRowid)));
 });
 
@@ -103,14 +147,21 @@ app.patch('/api/songs/:id', (req, res) => {
     bpm: req.body.bpm !== undefined ? optionalInt(req.body.bpm) : current.bpm,
     beats: req.body.beats !== undefined ? optionalInt(req.body.beats) ?? 4 : current.beats,
     key: req.body.key !== undefined ? optionalKey(req.body.key) : current.key,
+    singers: req.body.singers !== undefined ? cleanSingers(req.body.singers) || null : current.singers,
+    length_sec: req.body.length_sec !== undefined ? optionalInt(req.body.length_sec) : current.length_sec,
   };
+  if (next.length_sec !== null && (next.length_sec < 1 || next.length_sec > 7200)) {
+    throw new HttpError(400, 'Length must be between 0:01 and 2:00:00');
+  }
   if (next.bpm !== null && (next.bpm < 20 || next.bpm > 400)) throw new HttpError(400, 'BPM must be 20–400');
   if (next.beats < 1 || next.beats > 16) throw new HttpError(400, 'Beats per bar must be 1–16');
-  db.prepare('UPDATE songs SET title = ?, bpm = ?, beats = ?, "key" = ? WHERE id = ?').run(
+  db.prepare('UPDATE songs SET title = ?, bpm = ?, beats = ?, "key" = ?, singers = ?, length_sec = ? WHERE id = ?').run(
     next.title,
     next.bpm,
     next.beats,
     next.key,
+    next.singers,
+    next.length_sec,
     songId,
   );
   res.json(getSong(songId));
@@ -226,6 +277,46 @@ app.delete('/api/files/:id', (req, res) => {
 
 app.use('/files', express.static(LIBRARY_DIR, { maxAge: '1h' }));
 
+// ---------- Sticky notes on sheet music ----------
+
+const clampFraction = (v) => Math.min(1, Math.max(0, Number(v)));
+const noteText = (v) => String(v ?? '').trim().slice(0, 500);
+
+app.get('/api/sticky-notes', (_req, res) => res.json(db.prepare('SELECT * FROM sticky_notes ORDER BY id').all()));
+
+app.post('/api/sticky-notes', (req, res) => {
+  const fileId = id(req.body.file_id);
+  if (!db.prepare('SELECT 1 FROM song_files WHERE id = ?').get(fileId)) throw new HttpError(404, 'Sheet not found');
+  const text = noteText(req.body.text);
+  if (!text) throw new HttpError(400, 'A note needs some text');
+  const x = clampFraction(req.body.x);
+  const y = clampFraction(req.body.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new HttpError(400, 'Bad position');
+  const instrument = optionalInt(req.body.instrument_id);
+  const known = instrument !== null && db.prepare('SELECT 1 FROM instruments WHERE id = ?').get(instrument);
+  const r = db
+    .prepare('INSERT INTO sticky_notes (file_id, page, x, y, text, instrument_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(fileId, Math.max(1, optionalInt(req.body.page) ?? 1), x, y, text, known ? instrument : null);
+  res.status(201).json(db.prepare('SELECT * FROM sticky_notes WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/sticky-notes/:id', (req, res) => {
+  const noteId = id(req.params.id);
+  const current = db.prepare('SELECT * FROM sticky_notes WHERE id = ?').get(noteId);
+  if (!current) throw new HttpError(404, 'Note not found');
+  const text = req.body.text !== undefined ? noteText(req.body.text) : current.text;
+  if (!text) throw new HttpError(400, 'A note needs some text');
+  const x = req.body.x !== undefined ? clampFraction(req.body.x) : current.x;
+  const y = req.body.y !== undefined ? clampFraction(req.body.y) : current.y;
+  db.prepare('UPDATE sticky_notes SET text = ?, x = ?, y = ? WHERE id = ?').run(text, x, y, noteId);
+  res.json(db.prepare('SELECT * FROM sticky_notes WHERE id = ?').get(noteId));
+});
+
+app.delete('/api/sticky-notes/:id', (req, res) => {
+  db.prepare('DELETE FROM sticky_notes WHERE id = ?').run(id(req.params.id));
+  res.status(204).end();
+});
+
 // ---------- Gigs ----------
 
 const gigSummarySql = `
@@ -240,6 +331,17 @@ function getGig(gigId) {
   return gig;
 }
 
+/** Gig-specific singers per song (on top of each song's default singers), for searching. */
+app.get('/api/song-singers', (_req, res) =>
+  res.json(
+    db
+      .prepare(
+        "SELECT DISTINCT song_id, singers FROM gig_items WHERE kind = 'song' AND singers IS NOT NULL AND singers != ''",
+      )
+      .all(),
+  ),
+);
+
 app.get('/api/gigs', (_req, res) => {
   res.json(db.prepare(`${gigSummarySql} ORDER BY COALESCE(g.date, '9999') DESC, g.id DESC`).all());
 });
@@ -249,10 +351,23 @@ app.get('/api/gigs/:id', (req, res) => res.json(getGig(id(req.params.id))));
 app.post('/api/gigs', (req, res) => {
   const name = String(req.body.name ?? '').trim();
   if (!name) throw new HttpError(400, 'Name is required');
-  const r = db
-    .prepare('INSERT INTO gigs (name, date, instrument_id) VALUES (?, ?, ?)')
-    .run(name, req.body.date || null, optionalInt(req.body.instrument_id));
-  res.status(201).json(getGig(Number(r.lastInsertRowid)));
+  const copyFrom = optionalInt(req.body.copy_from);
+  if (copyFrom !== null) getGig(copyFrom); // 404 if the source gig is gone
+  const gigId = transaction(db, () => {
+    const r = db
+      .prepare('INSERT INTO gigs (name, date, instrument_id) VALUES (?, ?, ?)')
+      .run(name, req.body.date || null, optionalInt(req.body.instrument_id));
+    const newId = Number(r.lastInsertRowid);
+    // Start from another gig's setlist: same songs, notes, order, singers and starters.
+    if (copyFrom !== null) {
+      db.prepare(
+        `INSERT INTO gig_items (gig_id, position, kind, song_id, text, singers, starter_id)
+         SELECT ?, position, kind, song_id, text, singers, starter_id FROM gig_items WHERE gig_id = ? ORDER BY position`,
+      ).run(newId, copyFrom);
+    }
+    return newId;
+  });
+  res.status(201).json(getGig(gigId));
 });
 
 app.patch('/api/gigs/:id', (req, res) => {
@@ -285,7 +400,8 @@ app.put('/api/gigs/:id/items', (req, res) => {
     const instrumentIds = new Set(listInstruments().map((i) => i.id));
     items.forEach((item, i) => {
       if (item.kind === 'song') {
-        const singers = String(item.singers ?? '').trim().slice(0, 200) || null;
+        // null keeps the song's default singers; any string (even empty) is this gig's own choice.
+        const singers = item.singers === null || item.singers === undefined ? null : cleanSingers(item.singers);
         const starter = optionalInt(item.starter_id);
         insert.run(gigId, i, 'song', id(item.song_id), null, singers, instrumentIds.has(starter) ? starter : null);
       } else insert.run(gigId, i, 'text', null, String(item.text ?? ''), null, null);

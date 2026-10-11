@@ -253,6 +253,9 @@ input[type='number'] {
 .nav {
   display: flex;
   gap: 4px;
+  min-width: 0; /* never push the page wider than the screen */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .nav a {
   display: inline-flex;
@@ -270,6 +273,35 @@ input[type='number'] {
 .nav a.active {
   color: var(--text);
   background: var(--surface-2);
+}
+.my-instrument {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.my-instrument select {
+  max-width: 180px;
+}
+/* Narrow phones: icon-only tabs (the current one stays highlighted) and a compact instrument picker. */
+@media (max-width: 560px) {
+  .nav a {
+    padding: 8px 10px;
+    flex-shrink: 0;
+  }
+  .nav-label {
+    display: none;
+  }
+  .my-instrument svg {
+    display: none;
+  }
+  .my-instrument select {
+    max-width: 104px;
+    padding-left: 8px;
+    padding-right: 4px;
+  }
 }
 .content {
   flex: 1;
@@ -300,6 +332,10 @@ input[type='number'] {
 .page.narrow {
   max-width: 640px;
 }
+/* Grid children may shrink below their content (long song rows), so pages never get wider than the screen. */
+.split > * {
+  min-width: 0;
+}
 .split {
   display: grid;
   grid-template-columns: 340px 1fr;
@@ -316,6 +352,84 @@ input[type='number'] {
   position: sticky;
   top: 80px;
   max-height: calc(100vh - 104px);
+}
+.song-library {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+.song-library .song-list {
+  flex: 1;
+  min-height: 0;
+}
+.song-length {
+  min-width: 2.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.add-songs-btn {
+  display: none;
+}
+.setlist-timing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.setlist-timing strong {
+  color: var(--text);
+}
+.sheet-backdrop {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+}
+.sheet {
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  height: min(80vh, 760px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-body.scroll {
+  display: block;
+  overflow-y: auto;
+  margin: 0 -16px;
+  padding: 0 16px 24px;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sheet-head h2 {
+  margin: 0;
+  flex: 1;
 }
 .placeholder {
   display: grid;
@@ -353,6 +467,47 @@ input[type='number'] {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--muted);
+}
+.search.big {
+  padding: 2px 12px;
+  font-size: 1.15rem;
+}
+.search.big input {
+  padding: 12px 0;
+}
+.practice-search {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.singer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.practice-list {
+  margin: 0 -6px;
+}
+.practice-singers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.practice-singers .match {
+  color: var(--accent);
+  font-weight: 600;
+}
+.practice-play {
+  color: var(--accent);
 }
 .search input {
   border: none;
@@ -437,7 +592,7 @@ input[type='number'] {
   gap: 12px;
 }
 .field-grid.tempo {
-  grid-template-columns: 230px 160px 120px;
+  grid-template-columns: 230px 140px 110px 110px;
 }
 .field {
   display: flex;
@@ -490,6 +645,19 @@ input[type='number'] {
 }
 @keyframes tap-pulse {
   from { transform: scale(1.5); color: var(--accent); }
+}
+/* Form controls may shrink on narrow screens instead of widening the page. */
+.field-grid > *,
+.field > input,
+.field > select,
+.tempo-row > input,
+.gig-head-row > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.field.inline select {
+  flex: 1;
+  min-width: 0;
 }
 .field > span {
   font-size: 0.78rem;
@@ -654,7 +822,7 @@ input[type='number'] {
 }
 .new-gig .field-grid {
   width: 100%;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 2fr 1fr 1.5fr;
 }
 @media (max-width: 640px) {
   .new-gig .field-grid {
@@ -698,11 +866,13 @@ input[type='number'] {
 
 .gig-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
 }
 .gig-head-fields {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -751,6 +921,70 @@ input[type='number'] {
   grid-template-columns: 2fr 1fr;
   gap: 10px;
   padding: 8px 4px 2px 36px;
+}
+.singer-picker {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.singer-chips .chip {
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.singer-chips .chip:hover {
+  color: var(--text);
+}
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 1px 3px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.mode-toggle {
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.mode-toggle:hover {
+  border-color: var(--muted);
+}
+.mode-toggle span {
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.mode-toggle span.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.singer-chips .chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.singers-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.singers-row input {
+  flex: 1;
+  min-width: 0;
+}
+.pill.custom {
+  border: 1px dashed var(--accent);
 }
 .setlist-row.selected {
   border-color: var(--danger);
@@ -965,10 +1199,288 @@ select.compact {
   background: transparent;
 }
 
+.show-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.show-body.row {
+  flex-direction: row;
+}
+.show-body.col {
+  flex-direction: column;
+}
+.show-body > .stage {
+  min-width: 0;
+}
+.split-handle {
+  flex: 0 0 10px;
+  position: relative;
+  background: #0d0f13;
+  cursor: col-resize;
+  touch-action: none;
+}
+.show-body.col .split-handle {
+  cursor: row-resize;
+}
+.split-handle::after {
+  content: '';
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 44px;
+  border-radius: 4px;
+  background: #3a4150;
+}
+.show-body.col .split-handle::after {
+  width: 44px;
+  height: 4px;
+}
+.split-handle:hover::after,
+.split-handle:focus-visible::after {
+  background: var(--accent);
+}
+/* While dragging, the video must not swallow the pointer. */
+.dragging-split,
+.dragging-split * {
+  user-select: none;
+}
+.dragging-split iframe {
+  pointer-events: none;
+}
+.fun-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: #0b0c0f;
+}
+.fun {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fun-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-bottom: 1px solid #171a21;
+}
+.fun-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+}
+.fun-tabs button.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.fun-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.brainrot {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: #000;
+}
+.brainrot-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  object-fit: cover;
+}
+.brainrot-change {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: rgba(10, 11, 14, 0.75);
+  opacity: 0.5;
+}
+.brainrot-change:hover {
+  opacity: 1;
+}
+.brainrot-link {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(10, 11, 14, 0.9);
+}
+.brainrot-link input {
+  flex: 1;
+  min-width: 0;
+}
+.game-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.game-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+}
+.game-card span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text);
+}
+.game-card:hover {
+  border-color: var(--accent);
+}
+.minute-game {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+  text-align: center;
+}
+.game-back {
+  align-self: flex-start;
+}
+.minute-text {
+  margin: 0;
+  color: var(--muted);
+  max-width: 28ch;
+}
+.minute-btn {
+  min-width: 160px;
+  padding: 16px 28px;
+  font-size: 1.2rem;
+}
+.minute-btn.counting {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.minute-result {
+  font-size: clamp(2.5rem, 8vw, 4.5rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.minute-off {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--warn);
+}
+.minute-off.good {
+  color: var(--ok);
+}
+.minute-off.bad {
+  color: var(--danger);
+}
+.snake-game {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+}
+.snake-top {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.snake-score {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.snake-board {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+.snake-canvas {
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid #23272f;
+  touch-action: none;
+  image-rendering: pixelated;
+}
+.snake-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(8, 9, 11, 0.55);
+  text-align: center;
+}
+.snake-overlay p {
+  margin: 0;
+}
+.snake-over {
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+.snake-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-areas: '. up .' 'left down right';
+  gap: 4px;
+}
+.snake-pad .up { grid-area: up; }
+.snake-pad .left { grid-area: left; }
+.snake-pad .down { grid-area: down; }
+.snake-pad .right { grid-area: right; }
+.snake-pad .btn {
+  border: 1px solid var(--border);
+}
+.show-timer.hidden,
+.metronome-wrap.hidden {
+  visibility: hidden;
+}
 .stage {
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   padding: 8px;
   cursor: pointer;
 }
@@ -990,6 +1502,112 @@ select.compact {
 }
 .spread.n2 .pdf-page:last-child {
   justify-items: start;
+}
+/* The rendered page plus anything drawn over it (sticky notes), sized exactly like the page. */
+.pdf-sheet {
+  position: relative;
+  line-height: 0;
+}
+.pdf-sheet.picking {
+  cursor: crosshair;
+}
+.pdf-sheet.picking canvas {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.sticky-layer {
+  position: absolute;
+  inset: 0;
+  line-height: normal;
+  pointer-events: none;
+}
+.sticky-tag {
+  position: absolute;
+  transform: translate(-6px, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 45%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid #c99a2e;
+  border-radius: 4px 10px 10px 4px;
+  background: #ffe58a;
+  color: #3a2c05;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.sticky-tag.open {
+  outline: 2px solid var(--accent);
+}
+.sticky-bubble {
+  position: absolute;
+  z-index: 4;
+  width: min(280px, 80%);
+  padding: 10px;
+  border: 1px solid #c99a2e;
+  border-radius: 10px;
+  background: #fff3b8;
+  color: #2b2105;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  cursor: auto;
+}
+.sticky-bubble textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  background: #fffbe0;
+  color: #2b2105;
+  border: 1px solid #d9b85a;
+  font: inherit;
+  font-size: 0.95rem;
+}
+.sticky-text {
+  margin: 0;
+  padding-right: 22px;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.sticky-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: #6b5513;
+}
+.sticky-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.sticky-actions .danger {
+  margin-right: auto;
+  color: #b3261e;
+}
+.sticky-bubble .btn.ghost {
+  color: #4a3a0b;
+}
+.sticky-bubble .error {
+  margin: 6px 0 0;
+  color: #b3261e;
+}
+.add-notes-btn {
+  padding: 6px 10px;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+@media (max-width: 560px) {
+  .add-notes-label {
+    display: none;
+  }
 }
 .pdf-page canvas {
   display: block;
@@ -1036,11 +1654,14 @@ select.compact {
 
 /* No part for this instrument. */
 .slide-card.meme {
+  container-type: size;
   gap: 16px;
 }
 .meme-img {
-  /* Crop the watermark strip at the bottom of the source image. */
-  width: min(70vw, 55vh);
+  /* Crop the watermark strip at the bottom of the source image. Sized from the slide's own
+     box (container units), so it keeps its shape and crop in a split screen too. */
+  width: min(70cqw, 50cqh * 750 / 672);
+  height: auto;
   aspect-ratio: 750 / 672;
   object-fit: cover;
   object-position: top;
@@ -1261,6 +1882,33 @@ select.compact {
   .list-panel {
     position: static;
     max-height: 50vh;
+  }
+  /* Phones: the song list gets the whole page (editing happens in a sheet). */
+  .split > .list-panel:only-child {
+    max-height: none;
+  }
+  /* Phones: the library moves into a full-screen sheet behind an "Add songs" button. */
+  .library-aside,
+  .library-hint {
+    display: none;
+  }
+  .add-songs-btn {
+    display: flex;
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px;
+    border-style: dashed;
+  }
+  .sheet-backdrop {
+    padding: 0;
+  }
+  .sheet {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
   .field-grid,
   .field-grid.tempo {

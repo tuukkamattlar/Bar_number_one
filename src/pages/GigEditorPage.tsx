@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   DndContext,
@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  Clock,
   GripVertical,
   MessageSquareText,
   Mic,
@@ -28,16 +29,19 @@ import {
   Play,
   PlayCircle,
   Plus,
-  Search,
+  RotateCcw,
   SlidersHorizontal,
   Trash2,
 } from 'lucide-react';
-import { api, type Gig, type GigItem, type Instrument, type Song } from '../api';
+import { api, type Gig, type GigItem, type Instrument, type Singer, type Song } from '../api';
 import { useData } from '../lib/useData';
-import { defaultStarterId, partsFor, starterIdFor } from '../lib/parts';
+import { defaultStarterId, partsFor, singersFor, starterIdFor } from '../lib/parts';
 import { useMyInstrument } from '../lib/myInstrument';
 import { DangerZone } from '../components/DangerZone';
-import { InstrumentSelect } from '../components/InstrumentSelect';
+import { SingerPicker } from '../components/SingerPicker';
+import { SongLibrary } from '../components/SongLibrary';
+import { Sheet } from '../components/Sheet';
+import { GAP_BETWEEN_SONGS, formatApproxMinutes, formatDuration } from '../lib/duration';
 
 type Row = GigItem & { key: string };
 
@@ -49,11 +53,11 @@ export function GigEditorPage() {
   const navigate = useNavigate();
   const songs = useData(api.songs);
   const instruments = useData(api.instruments);
-  const [instrumentId, setInstrumentId] = useMyInstrument();
+  const singerList = useData(api.singers);
+  const [instrumentId] = useMyInstrument();
   const [gig, setGig] = useState<Gig | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
   const [customText, setCustomText] = useState('');
   // The setlist is locked unless editing, so a stray drag or click can't reorder or remove anything.
   const [editing, setEditing] = useState(false);
@@ -70,10 +74,30 @@ export function GigEditorPage() {
   }, [gigId]);
 
   const songById = useMemo(() => new Map((songs.data ?? []).map((s) => [s.id, s])), [songs.data]);
-  const library = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (songs.data ?? []).filter((s) => !q || s.title.toLowerCase().includes(q));
-  }, [songs.data, query]);
+  const inSet = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const r of rows) if (r.kind === 'song') counts.set(r.song_id, (counts.get(r.song_id) ?? 0) + 1);
+    return counts;
+  }, [rows]);
+
+  // Setlist length: song lengths plus a short gap between songs. Everything after the
+  // first "Encore" note counts as the encore.
+  const timing = useMemo(() => {
+    const measure = (list: Row[]) => {
+      const songsIn = list.filter((r) => r.kind === 'song').map((r) => songById.get(r.song_id!));
+      const known = songsIn.map((s) => s?.length_sec ?? 0).filter((n) => n > 0);
+      return {
+        songs: songsIn.length,
+        seconds: known.reduce((a, b) => a + b, 0) + GAP_BETWEEN_SONGS * Math.max(0, songsIn.length - 1),
+        missing: songsIn.length - known.length,
+      };
+    };
+    const encoreAt = rows.findIndex((r) => r.kind === 'text' && /encore/i.test(r.text ?? ''));
+    return { all: measure(rows), main: encoreAt >= 0 ? measure(rows.slice(0, encoreAt)) : null };
+  }, [rows, songById]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetStartCount, setSheetStartCount] = useState(0);
+  const closeSheet = useCallback(() => setSheetOpen(false), []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -151,10 +175,6 @@ export function GigEditorPage() {
           />
           <div className="gig-head-row">
             <input type="date" value={gig.date ?? ''} onChange={(e) => updateGig({ date: e.target.value || null })} />
-            <label className="field inline" title="Remembered on this device for every gig">
-              <span>My instrument</span>
-              <InstrumentSelect instruments={instruments.data ?? []} value={instrumentId} onChange={setInstrumentId} />
-            </label>
           </div>
         </div>
         <div className="gig-head-actions">
@@ -198,6 +218,31 @@ export function GigEditorPage() {
             )}
           </div>
 
+          {timing.all.songs > 0 && (
+            <div className="setlist-timing">
+              <Clock size={14} />
+              {timing.all.missing === timing.all.songs ? (
+                <span className="muted">Add song lengths in Songs to see how long the set is.</span>
+              ) : (
+                <>
+                  <span>
+                    <strong>{formatApproxMinutes(timing.all.seconds)}</strong> total
+                  </span>
+                  {timing.main && timing.main.songs < timing.all.songs && (
+                    <span>
+                      <strong>{formatApproxMinutes(timing.main.seconds)}</strong> without encore
+                    </span>
+                  )}
+                  {timing.all.missing > 0 && (
+                    <span className="warn">
+                      + {timing.all.missing} song{timing.all.missing > 1 ? 's' : ''} without a length
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {editing && (
             <div className="edit-bar">
               <span className="muted small">Drag ⋮⋮ to reorder · tick rows to remove</span>
@@ -235,6 +280,7 @@ export function GigEditorPage() {
                     selected={selected.has(row.key)}
                     onToggle={() => toggleSelected(row.key)}
                     showFrom={`/gigs/${gigId}/show?from=${index}`}
+                    singerList={singerList.data ?? []}
                     onDetails={(patch) =>
                       persist(rows.map((r) => (r.key === row.key && r.kind === 'song' ? { ...r, ...patch } : r)))
                     }
@@ -244,7 +290,17 @@ export function GigEditorPage() {
               </ol>
             </SortableContext>
           </DndContext>
-          {rows.length === 0 && <p className="empty">Add songs from your library →</p>}
+          {rows.length === 0 && <p className="empty library-hint">Add songs from your library →</p>}
+          <button
+            type="button"
+            className="btn add-songs-btn"
+            onClick={() => {
+              setSheetStartCount(songCount);
+              setSheetOpen(true);
+            }}
+          >
+            <Plus size={16} /> Add songs
+          </button>
 
           <div className="text-adder">
             <MessageSquareText size={16} className="muted" />
@@ -269,42 +325,26 @@ export function GigEditorPage() {
           </div>
         </section>
 
-        <aside className="panel list-panel">
+        <aside className="panel list-panel library-aside">
           <div className="panel-head">
             <h2>Library</h2>
             <Link to="/songs" className="muted small">
               Manage songs
             </Link>
           </div>
-          <label className="search">
-            <Search size={16} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search songs" />
-          </label>
-          <ul className="song-list">
-            {library.map((s) => {
-              const count = rows.filter((r) => r.kind === 'song' && r.song_id === s.id).length;
-              return (
-                <li key={s.id}>
-                  <button className="song-row" onClick={() => addSong(s)} title="Add to setlist">
-                    <span className="song-row-main">
-                      <span className="song-title">{s.title}</span>
-                    </span>
-                    <span className="song-row-meta">
-                      {count > 0 && <span className="pill subtle">in set{count > 1 ? ` ×${count}` : ''}</span>}
-                      <Plus size={16} />
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-            {songs.data?.length === 0 && (
-              <li className="empty small">
-                Your library is empty. <Link to="/songs">Add songs</Link> first.
-              </li>
-            )}
-          </ul>
+          <SongLibrary songs={songs.data ?? []} singers={singerList.data ?? []} inSet={inSet} onAdd={addSong} />
         </aside>
       </div>
+
+      {sheetOpen && (
+        <Sheet
+          title="Add songs"
+          onClose={closeSheet}
+          badge={songCount > sheetStartCount && <span className="pill">+{songCount - sheetStartCount} added</span>}
+        >
+          <SongLibrary songs={songs.data ?? []} singers={singerList.data ?? []} inSet={inSet} onAdd={addSong} autoFocus />
+        </Sheet>
+      )}
 
       <DangerZone
         what="gig"
@@ -330,6 +370,7 @@ function SetlistRow({
   onToggle,
   onDetails,
   showFrom,
+  singerList,
   onText,
 }: {
   row: Row;
@@ -342,10 +383,21 @@ function SetlistRow({
   onToggle: () => void;
   onDetails: (patch: { singers?: string | null; starter_id?: number | null }) => void;
   showFrom: string;
+  singerList: Singer[];
   onText: (text: string) => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [singers, setSingers] = useState(row.kind === 'song' ? (row.singers ?? '') : '');
+  const defaultSingers = song?.singers ?? '';
+  const customSingers = row.kind === 'song' && row.singers != null;
+  const effectiveSingers = row.kind === 'song' ? singersFor(row, song) : null;
+  const [singers, setSingers] = useState(row.kind === 'song' ? (row.singers ?? defaultSingers) : '');
+
+  function saveSingers(raw = singers) {
+    const value = raw.trim();
+    if (customSingers ? value === row.singers : value === defaultSingers.trim()) return;
+    // Matching the song's default means "use the default" again.
+    onDetails({ singers: value === defaultSingers.trim() ? null : value });
+  }
   const defaultStarter = defaultStarterId(instruments);
   const starterId = row.kind === 'song' ? starterIdFor(row, instruments) : null;
   const starterName = instruments.find((i) => i.id === starterId)?.name;
@@ -380,9 +432,12 @@ function SetlistRow({
             <span className="song-title">{song?.title ?? 'Missing song'}</span>
           </span>
           <span className="song-row-meta">
-            {row.singers && (
-              <span className="pill subtle" title="Singers">
-                <Mic size={12} /> {row.singers}
+            {effectiveSingers && (
+              <span
+                className={`pill subtle ${customSingers ? 'custom' : ''}`}
+                title={customSingers ? 'Singers for this gig' : 'Default singers'}
+              >
+                <Mic size={12} /> {effectiveSingers}
               </span>
             )}
             {starterId !== defaultStarter && starterName && (
@@ -390,6 +445,7 @@ function SetlistRow({
                 <PlayCircle size={12} /> {starterName}
               </span>
             )}
+            {song?.length_sec && <span className="muted small">{formatDuration(song.length_sec)}</span>}
             {song?.key && <span className="pill">{song.key}</span>}
             {song?.bpm && <span className="pill">{song.bpm} bpm</span>}
             {parts?.source === 'general' && instrument && (
@@ -420,14 +476,31 @@ function SetlistRow({
           {detailsOpen && (
             <div className="row-details">
               <label className="field">
-                <span>Singers</span>
-                <input
-                  value={singers}
-                  maxLength={200}
-                  onChange={(e) => setSingers(e.target.value)}
-                  onBlur={() => singers.trim() !== (row.singers ?? '') && onDetails({ singers: singers.trim() || null })}
-                  placeholder="e.g. Anna, Ville"
-                />
+                <span>
+                  Singers {customSingers ? '(this gig only)' : defaultSingers ? '(song default)' : ''}
+                </span>
+                <span className="singers-row">
+                  <SingerPicker
+                    value={singers}
+                    singers={singerList}
+                    onChange={setSingers}
+                    onCommit={saveSingers}
+                    placeholder={customSingers ? 'Nobody sings at this gig' : 'e.g. Marianna, Kalle'}
+                  />
+                  {customSingers && (
+                    <button
+                      type="button"
+                      className="btn ghost small-btn"
+                      title={defaultSingers ? `Back to the song's default: ${defaultSingers}` : 'Back to the song default (none)'}
+                      onClick={() => {
+                        setSingers(defaultSingers);
+                        onDetails({ singers: null });
+                      }}
+                    >
+                      <RotateCcw size={13} /> Restore default
+                    </button>
+                  )}
+                </span>
               </label>
               <label className="field">
                 <span>Starts the song</span>

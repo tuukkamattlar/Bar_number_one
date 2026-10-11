@@ -7,6 +7,7 @@ import { GigsPage } from './pages/GigsPage';
 import { GigEditorPage } from './pages/GigEditorPage';
 import { ShowPage } from './pages/ShowPage';
 import { InstrumentsPage } from './pages/InstrumentsPage';
+import { PracticePage } from './pages/PracticePage';
 import './styles.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -19,8 +20,10 @@ createRoot(document.getElementById('root')!).render(
           <Route path="gigs" element={<GigsPage />} />
           <Route path="gigs/:id" element={<GigEditorPage />} />
           <Route path="instruments" element={<InstrumentsPage />} />
+          <Route path="practice" element={<PracticePage />} />
         </Route>
         <Route path="gigs/:id/show" element={<ShowPage />} />
+        <Route path="practice/:songId" element={<ShowPage />} />
         <Route path="*" element={<Navigate to="/gigs" replace />} />
       </Routes>
     </BrowserRouter>
